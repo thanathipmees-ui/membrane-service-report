@@ -50,9 +50,6 @@ const ImageThumbnail: React.FC<{
       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
         <Eye className="w-4 h-4 text-white" />
       </div>
-      <span className="absolute bottom-1 right-1 w-4 h-4 rounded-full bg-black/70 text-white text-[9px] font-bold flex items-center justify-center">
-        {idx + 1}
-      </span>
     </button>
   );
 };

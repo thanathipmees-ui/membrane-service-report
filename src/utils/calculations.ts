@@ -1,4 +1,4 @@
-import { MembraneData, TestMetrics, HeaderConfig } from '../types';
+import { MembraneData, TestMetrics, HeaderConfig, TestCycle } from '../types';
 
 export const metricDefs = [
   { key: 'inletPressure' as keyof TestMetrics, label: 'Inlet test pressure / แรงดันน้ำเข้า', unit: 'PSI' },
@@ -78,6 +78,108 @@ export function getMembraneHeader(membrane?: MembraneData, fallbackConfig?: Head
     jobDescription: membrane.headerConfig.jobDescription || fb.jobDescription,
     servicePeriod: membrane.headerConfig.servicePeriod || fb.servicePeriod,
   };
+}
+
+export function generateTrendChartSvgHtml(
+  title: string,
+  metricKey: keyof TestMetrics,
+  unit: string = '%',
+  cycles: TestCycle[]
+): string {
+  const validCycles = (cycles || []).filter(c => c && c.before && c.after).slice(-5);
+  if (validCycles.length === 0) return '';
+
+  const beforeValues = validCycles.map(c => {
+    let val = c.before?.[metricKey];
+    if ((val == null || isNaN(Number(val))) && metricKey === 'recovery') val = calculateRecovery(c.before?.inletFlow, c.before?.concentrateFlow);
+    if ((val == null || isNaN(Number(val))) && metricKey === 'rejection') val = calculateRejection(c.before?.permeateConductivity, c.before?.rawWaterConductivity);
+    return Number(val);
+  });
+
+  const afterValues = validCycles.map(c => {
+    let val = c.after?.[metricKey];
+    if ((val == null || isNaN(Number(val))) && metricKey === 'recovery') val = calculateRecovery(c.after?.inletFlow, c.after?.concentrateFlow);
+    if ((val == null || isNaN(Number(val))) && metricKey === 'rejection') val = calculateRejection(c.after?.permeateConductivity, c.after?.rawWaterConductivity);
+    return Number(val);
+  });
+
+  const allValues = [...beforeValues, ...afterValues].filter(v => !isNaN(v) && v !== null);
+  const rawMin = allValues.length ? Math.min(...allValues) : 0;
+  const rawMax = allValues.length ? Math.max(...allValues) : 100;
+  const padding = Math.max((rawMax - rawMin) * 0.2, 2);
+  const min = Math.max(0, Math.floor(rawMin - padding));
+  const max = Math.ceil(rawMax + padding);
+
+  const width = 380;
+  const height = 140;
+  const left = 40;
+  const right = 16;
+  const top = 18;
+  const bottom = 30;
+
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+
+  const getX = (i: number) => {
+    if (validCycles.length === 1) return left + plotW / 2;
+    return left + (plotW * i) / (validCycles.length - 1);
+  };
+
+  const getY = (val: number) => {
+    if (isNaN(val)) return top + plotH / 2;
+    const range = Math.max(max - min, 1);
+    return top + plotH - ((val - min) / range) * plotH;
+  };
+
+  const formatShortDate = (str: string) => {
+    if (!str) return 'N/A';
+    return str.replace(/(\d+) ([A-Za-z]+) (\d+)/, (_, d, m, y) => `${d} ${m.slice(0, 3)} ${y.slice(2)}`);
+  };
+
+  const beforePoints = beforeValues.map((v, i) => !isNaN(v) ? `${getX(i)},${getY(v)}` : '').filter(Boolean).join(' ');
+  const afterPoints = afterValues.map((v, i) => !isNaN(v) ? `${getX(i)},${getY(v)}` : '').filter(Boolean).join(' ');
+
+  const gridSteps = [min, Math.round((min + max) / 2), max];
+
+  const gridLinesHtml = gridSteps.map(step => `
+    <line x1="${left}" x2="${width - right}" y1="${getY(step)}" y2="${getY(step)}" stroke="#e2e8f0" stroke-dasharray="3 3" stroke-width="1" />
+    <text x="${left - 5}" y="${getY(step) + 3}" text-anchor="end" fill="#94a3b8" font-size="8.5" font-weight="700">${step}${unit}</text>
+  `).join('');
+
+  const beforeCircles = beforeValues.map((v, i) => !isNaN(v) ? `
+    <circle cx="${getX(i)}" cy="${getY(v)}" r="3" fill="#fef3c7" stroke="#d97706" stroke-width="2" />
+    <text x="${getX(i)}" y="${getY(v) - 5}" text-anchor="middle" fill="#b45309" font-size="8.5" font-weight="800">${formatNumber(v)}${unit}</text>
+  ` : '').join('');
+
+  const afterCircles = afterValues.map((v, i) => !isNaN(v) ? `
+    <circle cx="${getX(i)}" cy="${getY(v)}" r="3" fill="#d1fae5" stroke="#059669" stroke-width="2" />
+    <text x="${getX(i)}" y="${getY(v) - 5}" text-anchor="middle" fill="#047857" font-size="8.5" font-weight="800">${formatNumber(v)}${unit}</text>
+  ` : '').join('');
+
+  const xLabels = validCycles.map((c, i) => `
+    <text x="${getX(i)}" y="${height - 6}" text-anchor="middle" fill="#64748b" font-size="8.5" font-weight="700">${formatShortDate(c.date)}</text>
+  `).join('');
+
+  return `
+    <div class="trend-chart-card">
+      <div class="trend-chart-header">
+        <span class="trend-chart-title">${title}</span>
+        <div class="trend-legend">
+          <span style="color: #b45309;"><span class="legend-dot" style="background: #d97706;"></span> ก่อนล้าง</span>
+          <span style="color: #047857;"><span class="legend-dot" style="background: #059669;"></span> หลังล้าง</span>
+        </div>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" style="width: 100%; height: auto; display: block; overflow: visible;">
+        ${gridLinesHtml}
+        <line x1="${left}" x2="${width - right}" y1="${height - bottom}" y2="${height - bottom}" stroke="#cbd5e1" stroke-width="1.5" />
+        ${beforePoints ? `<polyline points="${beforePoints}" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />` : ''}
+        ${afterPoints ? `<polyline points="${afterPoints}" fill="none" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />` : ''}
+        ${beforeCircles}
+        ${afterCircles}
+        ${xLabels}
+      </svg>
+    </div>
+  `;
 }
 
 export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderConfig, customFilename?: string) {
@@ -175,7 +277,6 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
           ${validImages.map((src, idx) => `
             <div class="photo-item" style="border-color: ${borderColor};" onclick="showPhoto('${src.replace(/'/g, "\\'")}')">
               <img src="${src}" alt="${type} photo ${idx + 1}" loading="lazy" />
-              <span class="photo-idx">${idx + 1}</span>
             </div>
           `).join('')}
         </div>
@@ -241,6 +342,28 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
               </tbody>
             </table>
           </div>
+
+          <!-- Trend Charts (% Recovery & % Rejection) -->
+          ${(() => {
+            const cyclesToUse = (m.cycles && m.cycles.length > 0)
+              ? m.cycles
+              : [{ date: latestCycle.date || '10 June 2026', before, after }];
+
+            const recoveryChartHtml = generateTrendChartSvgHtml('📈 % Recovery Trend (ดึงน้ำกลับ)', 'recovery', '%', cyclesToUse);
+            const rejectionChartHtml = generateTrendChartSvgHtml('🛡️ % Salt Rejection Trend (ขจัดเกลือ)', 'rejection', '%', cyclesToUse);
+
+            return `
+              <div class="charts-section">
+                <div style="margin-bottom: 6px;">
+                  <h3 style="font-size: 13px; font-weight: 800; color: #0f172a; margin: 0;">📉 กราฟแนวโน้ม Performance (% Recovery & % Rejection)</h3>
+                </div>
+                <div class="charts-grid">
+                  ${recoveryChartHtml}
+                  ${rejectionChartHtml}
+                </div>
+              </div>
+            `;
+          })()}
 
           <div class="photo-section">
             <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 12px;">
@@ -562,6 +685,63 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
       gap: 10px;
     }
 
+    /* Charts Layout */
+    .charts-section {
+      margin-top: 18px;
+      margin-bottom: 18px;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    @media (max-width: 640px) {
+      .charts-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .trend-chart-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    .trend-chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .trend-chart-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #1e293b;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .trend-legend {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 3px;
+    }
+
     .photo-section {
       background: #0f172a;
       color: white;
@@ -571,26 +751,23 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
     }
 
     .photo-grid {
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      gap: 10px;
-      margin-top: 8px;
-    }
-
-    @media (max-width: 768px) {
-      .photo-grid {
-        grid-template-columns: repeat(3, 1fr);
-      }
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
     }
 
     .photo-item {
       position: relative;
-      aspect-ratio: 1 / 1;
-      border-radius: 10px;
+      width: 58px;
+      height: 58px;
+      border-radius: 8px;
       overflow: hidden;
       background: #1e293b;
       border: 2px solid rgba(255, 255, 255, 0.2);
       cursor: pointer;
+      flex-shrink: 0;
       transition: transform 0.2s ease;
     }
 
@@ -602,34 +779,19 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    .photo-idx {
-      position: absolute;
-      bottom: 4px;
-      right: 4px;
-      background: rgba(0, 0, 0, 0.8);
-      color: white;
-      font-size: 10px;
-      font-weight: 800;
-      width: 18px;
-      height: 18px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: block;
     }
 
     @media print {
       @page {
         size: A4 portrait;
-        margin: 8mm 10mm;
+        margin: 5mm 6mm;
       }
       body {
         background: white !important;
         padding: 0 !important;
         color: #0f172a !important;
-        font-size: 11px;
+        font-size: 10px;
       }
       .container {
         max-width: 100% !important;
@@ -640,108 +802,146 @@ export function exportHtmlFile(membranes: MembraneData[], headerConfig?: HeaderC
       }
       .masthead {
         box-shadow: none !important;
-        border-radius: 12px !important;
-        padding: 16px 20px !important;
+        border-radius: 10px !important;
+        padding: 12px 16px !important;
         background: #0b1b35 !important;
         color: white !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        page-break-inside: avoid;
-        break-inside: avoid;
-        margin-bottom: 16px !important;
+        page-break-after: always;
+        break-after: page;
+        margin-bottom: 0 !important;
       }
-      .masthead-title { font-size: 20px !important; }
-      .stats-bar { margin-top: 10px !important; gap: 8px !important; }
-      .stat-pill { padding: 4px 10px !important; font-size: 11px !important; }
+      .masthead-title { font-size: 18px !important; }
+      .stats-bar { margin-top: 8px !important; gap: 6px !important; }
+      .stat-pill { padding: 3px 8px !important; font-size: 10px !important; }
 
       .section-card {
-        page-break-inside: avoid;
-        break-inside: avoid;
-        box-shadow: none !important;
-        padding: 16px !important;
-        border-radius: 12px !important;
-        margin-bottom: 16px !important;
-      }
-
-      .membrane-card {
-        page-break-inside: avoid;
-        break-inside: avoid;
         page-break-after: always;
         break-after: page;
         box-shadow: none !important;
+        padding: 12px !important;
+        border-radius: 10px !important;
+      }
+
+      .membrane-card {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        page-break-after: always !important;
+        break-after: page !important;
+        box-shadow: none !important;
         border: 1px solid #cbd5e1 !important;
-        border-radius: 12px !important;
+        border-radius: 10px !important;
         margin-bottom: 0 !important;
       }
 
       .membrane-card:last-child {
-        page-break-after: auto;
-        break-after: auto;
+        page-break-after: auto !important;
+        break-after: auto !important;
       }
 
       .card-header {
-        padding: 10px 16px !important;
+        padding: 8px 12px !important;
       }
       .card-header h2 {
-        font-size: 16px !important;
+        font-size: 15px !important;
       }
       .card-body {
-        padding: 12px 16px !important;
+        padding: 10px 12px !important;
       }
 
       .meta-grid {
-        gap: 8px !important;
-        margin-bottom: 10px !important;
+        gap: 6px !important;
+        margin-bottom: 6px !important;
       }
       .meta-item {
-        padding: 6px 10px !important;
-        border-radius: 8px !important;
+        padding: 4px 8px !important;
+        border-radius: 6px !important;
       }
-      .meta-label { font-size: 9px !important; }
-      .meta-value { font-size: 12px !important; margin-top: 2px !important; }
+      .meta-label { font-size: 8px !important; }
+      .meta-value { font-size: 11px !important; margin-top: 1px !important; }
 
       .remark-box {
-        padding: 8px 12px !important;
-        margin-bottom: 10px !important;
-        font-size: 11px !important;
+        padding: 6px 10px !important;
+        margin-bottom: 6px !important;
+        font-size: 10px !important;
       }
 
       table {
-        margin: 6px 0 !important;
-        font-size: 11px !important;
+        margin: 4px 0 !important;
+        font-size: 9.5px !important;
       }
       th {
-        padding: 6px 8px !important;
-        font-size: 10px !important;
+        padding: 4px 6px !important;
+        font-size: 9px !important;
         background-color: #0f172a !important;
         color: white !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
       td {
-        padding: 4px 8px !important;
+        padding: 3px 6px !important;
+      }
+
+      .charts-section {
+        margin-top: 6px !important;
+        margin-bottom: 6px !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .charts-grid {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        gap: 8px !important;
+        margin-top: 4px !important;
+      }
+      .trend-chart-card {
+        padding: 6px 8px !important;
+        border-radius: 8px !important;
+        background: #f8fafc !important;
+        border: 1px solid #e2e8f0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .trend-chart-title {
+        font-size: 9px !important;
+      }
+      .trend-legend {
+        font-size: 8px !important;
+        gap: 6px !important;
       }
 
       .photo-section {
-        padding: 12px 14px !important;
-        margin-top: 10px !important;
-        border-radius: 10px !important;
+        padding: 8px 10px !important;
+        margin-top: 6px !important;
+        border-radius: 8px !important;
         background: #0f172a !important;
         color: white !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        page-break-inside: avoid;
-        break-inside: avoid;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
       }
       .photo-grid {
-        gap: 6px !important;
+        display: flex !important;
+        flex-wrap: wrap !important;
+        align-items: center !important;
+        gap: 4px !important;
         margin-top: 4px !important;
       }
       .photo-item {
-        border-radius: 6px !important;
+        width: 48px !important;
+        height: 48px !important;
+        border-radius: 4px !important;
+        border-width: 1.5px !important;
+        max-height: none !important;
+        flex-shrink: 0 !important;
       }
       .photo-item img {
+        width: 100% !important;
+        height: 100% !important;
         object-fit: cover !important;
+        display: block !important;
       }
     }
   </style>
