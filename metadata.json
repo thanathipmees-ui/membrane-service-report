@@ -1,0 +1,6 @@
+{
+  "name": "Lion RO4 Membrane Service Report",
+  "description": "ระบบรายงานการล้างไส้กรองเมมเบรน RO4 Pass1 - Lion Corporation (Thailand) Limited รองรับการเพิ่มรายงานใหม่ แก้ไขรูปภาพและข้อมูล",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
