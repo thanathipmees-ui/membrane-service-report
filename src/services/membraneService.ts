@@ -55,12 +55,38 @@ export function subscribeMembranes(
   return unsubscribe;
 }
 
+/**
+ * Recursively cleans object for Firestore saving.
+ * Converts `undefined` values to `null` to prevent Firestore `undefined` field errors.
+ */
+function sanitizeForFirestore<T>(data: T): T {
+  if (data === undefined) {
+    return null as unknown as T;
+  }
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  const cleanObj: Record<string, any> = {};
+  for (const [key, val] of Object.entries(data as Record<string, any>)) {
+    if (val !== undefined) {
+      cleanObj[key] = sanitizeForFirestore(val);
+    } else {
+      cleanObj[key] = null;
+    }
+  }
+  return cleanObj as T;
+}
+
 export async function saveMembraneToCloud(membrane: MembraneData): Promise<void> {
   const docRef = doc(db, COLLECTION_NAME, String(membrane.membraneNo));
-  const dataToSave = {
+  const rawData = {
     ...membrane,
     updatedAt: new Date().toISOString()
   };
+  const dataToSave = sanitizeForFirestore(rawData);
   await setDoc(docRef, dataToSave, { merge: true });
 }
 
@@ -73,11 +99,12 @@ export async function seedInitialData(): Promise<void> {
   const batch = writeBatch(db);
   initialMembranes.forEach((m) => {
     const docRef = doc(db, COLLECTION_NAME, String(m.membraneNo));
-    const dataToSave = {
+    const rawData = {
       ...m,
       headerConfig: m.headerConfig || { ...defaultHeaderConfig },
       updatedAt: new Date().toISOString()
     };
+    const dataToSave = sanitizeForFirestore(rawData);
     batch.set(docRef, dataToSave);
   });
   await batch.commit();

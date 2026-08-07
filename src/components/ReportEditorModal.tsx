@@ -49,6 +49,7 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
   const [afterImages, setAfterImages] = useState<string[]>(initialData.images?.after ? [...initialData.images.after] : []);
 
   const [autoCalc, setAutoCalc] = useState<boolean>(true);
+  const [isProcessingImages, setIsProcessingImages] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -219,7 +220,7 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
 
   if (!isOpen) return null;
 
-  const compressAndReadImage = (file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.8): Promise<string> => {
+  const compressAndReadImage = (file: File, maxWidth = 600, maxHeight = 600, quality = 0.6): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onerror = () => resolve('');
@@ -266,14 +267,20 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
 
   const handleBeforeImageChange = async (index: number, file: File | null) => {
     if (!file) return;
-    const base64 = await compressAndReadImage(file);
-    if (!base64) return;
-    setBeforeImages(prev => {
-      const updated = [...prev];
-      while (updated.length < 5) updated.push('');
-      updated[index] = base64;
-      return updated;
-    });
+    setIsProcessingImages(true);
+    try {
+      const base64 = await compressAndReadImage(file);
+      if (base64) {
+        setBeforeImages(prev => {
+          const updated = [...prev];
+          while (updated.length < 5) updated.push('');
+          updated[index] = base64;
+          return updated;
+        });
+      }
+    } finally {
+      setIsProcessingImages(false);
+    }
   };
 
   const removeBeforeImage = (index: number) => {
@@ -286,14 +293,20 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
 
   const handleAfterImageChange = async (index: number, file: File | null) => {
     if (!file) return;
-    const base64 = await compressAndReadImage(file);
-    if (!base64) return;
-    setAfterImages(prev => {
-      const updated = [...prev];
-      while (updated.length < 5) updated.push('');
-      updated[index] = base64;
-      return updated;
-    });
+    setIsProcessingImages(true);
+    try {
+      const base64 = await compressAndReadImage(file);
+      if (base64) {
+        setAfterImages(prev => {
+          const updated = [...prev];
+          while (updated.length < 5) updated.push('');
+          updated[index] = base64;
+          return updated;
+        });
+      }
+    } finally {
+      setIsProcessingImages(false);
+    }
   };
 
   const removeAfterImage = (index: number) => {
@@ -306,30 +319,40 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
 
   const handleBatchUploadBefore = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const fileList = Array.from(files).slice(0, 5);
-    const compressedList = await Promise.all(fileList.map(f => compressAndReadImage(f)));
-    setBeforeImages(prev => {
-      const updated = [...prev];
-      while (updated.length < 5) updated.push('');
-      compressedList.forEach((b64, idx) => {
-        if (b64) updated[idx] = b64;
+    setIsProcessingImages(true);
+    try {
+      const fileList = Array.from(files).slice(0, 5);
+      const compressedList = await Promise.all(fileList.map(f => compressAndReadImage(f)));
+      setBeforeImages(prev => {
+        const updated = [...prev];
+        while (updated.length < 5) updated.push('');
+        compressedList.forEach((b64, idx) => {
+          if (b64) updated[idx] = b64;
+        });
+        return updated;
       });
-      return updated;
-    });
+    } finally {
+      setIsProcessingImages(false);
+    }
   };
 
   const handleBatchUploadAfter = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const fileList = Array.from(files).slice(0, 5);
-    const compressedList = await Promise.all(fileList.map(f => compressAndReadImage(f)));
-    setAfterImages(prev => {
-      const updated = [...prev];
-      while (updated.length < 5) updated.push('');
-      compressedList.forEach((b64, idx) => {
-        if (b64) updated[idx] = b64;
+    setIsProcessingImages(true);
+    try {
+      const fileList = Array.from(files).slice(0, 5);
+      const compressedList = await Promise.all(fileList.map(f => compressAndReadImage(f)));
+      setAfterImages(prev => {
+        const updated = [...prev];
+        while (updated.length < 5) updated.push('');
+        compressedList.forEach((b64, idx) => {
+          if (b64) updated[idx] = b64;
+        });
+        return updated;
       });
-      return updated;
-    });
+    } finally {
+      setIsProcessingImages(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -888,6 +911,13 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
             </h4>
 
             {/* Folder / Batch Upload Tip Banner */}
+            {isProcessingImages && (
+              <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl p-3.5 text-xs flex items-center gap-2.5 animate-pulse">
+                <div className="w-4 h-4 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                <span className="font-bold">กำลังประมวลผลและย่อขนาดรูปถ่ายอัตโนมัติ เพื่อให้พอดีกับฐานข้อมูลคลาวด์...</span>
+              </div>
+            )}
+
             <div className="bg-blue-50/90 border border-blue-200 text-blue-900 rounded-xl p-3.5 text-xs flex items-start gap-2.5">
               <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <div>
