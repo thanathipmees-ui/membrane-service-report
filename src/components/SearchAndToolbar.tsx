@@ -149,10 +149,11 @@ export const SearchAndToolbar: React.FC<SearchAndToolbarProps> = ({
         <div className="flex items-center gap-2">
           <button
             onClick={onEditCurrent}
-            className="inline-flex items-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-xs font-bold px-3.5 py-2 rounded-xl transition-all cursor-pointer shadow-sm"
+            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/20"
+            title="แก้ไขข้อมูลไส้กรอง ผลการทดสอบ รูปภาพ และหัวข้อบริษัทในหน้าเดียว"
           >
-            <Edit className="w-3.5 h-3.5 text-blue-600" />
-            <span>แก้ไขหน้านี้ (No. {currentMembrane?.membraneNo})</span>
+            <Edit className="w-3.5 h-3.5 text-blue-100" />
+            <span>แก้ไขรายงานหน้านี้ & หัวข้อ (No. {currentMembrane?.membraneNo})</span>
           </button>
 
           <button

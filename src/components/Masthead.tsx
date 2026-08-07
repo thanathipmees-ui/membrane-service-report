@@ -1,13 +1,11 @@
 import React from 'react';
 import { MembraneData, HeaderConfig } from '../types';
-import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText, Edit3 } from 'lucide-react';
-import { exportHtmlFile } from '../utils/calculations';
+import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText } from 'lucide-react';
 
 interface MastheadProps {
   membranes: MembraneData[];
   headerConfig?: HeaderConfig;
   onNewReport: () => void;
-  onEditHeader: () => void;
   onExportHtml: () => void;
 }
 
@@ -15,7 +13,6 @@ export const Masthead: React.FC<MastheadProps> = ({
   membranes,
   headerConfig,
   onNewReport,
-  onEditHeader,
   onExportHtml,
 }) => {
   const passCount = membranes.filter(m => m.status === 'PASS').length;
@@ -48,15 +45,6 @@ export const Masthead: React.FC<MastheadProps> = ({
 
           {/* Quick Stats & Primary Action Buttons */}
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={onEditHeader}
-              className="inline-flex items-center gap-1.5 bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-cyan-400/30 transition-all cursor-pointer"
-              title="แก้ไขชื่อบริษัท ชื่อเรื่องรายงาน และรายละเอียดงาน"
-            >
-              <Edit3 className="w-3.5 h-3.5" />
-              <span>แก้ไขหัวข้อรายงาน</span>
-            </button>
-
             <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md px-3.5 py-2 rounded-xl border border-white/15 text-xs text-slate-100">
               <Layers className="w-4 h-4 text-cyan-300" />
               <span>ทั้งหมด <strong>{membranes.length}</strong> ชิ้น</span>

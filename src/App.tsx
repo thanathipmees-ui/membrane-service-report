@@ -232,7 +232,6 @@ export default function App() {
         membranes={membranes}
         headerConfig={activeHeaderConfig}
         onNewReport={handleNewReportClick}
-        onEditHeader={() => setIsHeaderEditorOpen(true)}
         onExportHtml={() => setIsExportModalOpen(true)}
       />
 
@@ -241,7 +240,6 @@ export default function App() {
         <JobMetaBar
           totalCount={membranes.length}
           headerConfig={activeHeaderConfig}
-          onEditHeader={() => setIsHeaderEditorOpen(true)}
         />
 
         {/* Search & Navigation Toolbar */}
