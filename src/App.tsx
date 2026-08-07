@@ -10,6 +10,7 @@ import { ReportEditorModal } from './components/ReportEditorModal';
 import { HeaderEditorModal } from './components/HeaderEditorModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
+import { ExportModal } from './components/ExportModal';
 
 const LOCAL_STORAGE_KEY = 'lion_ro4_pass1_membranes_v2';
 const HEADER_CONFIG_KEY = 'lion_ro4_header_config_v1';
@@ -70,6 +71,9 @@ export default function App() {
 
   // Delete confirm modal state
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
+
+  // Export HTML modal state
+  const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
   // Photo Lightbox state
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -229,6 +233,7 @@ export default function App() {
         headerConfig={activeHeaderConfig}
         onNewReport={handleNewReportClick}
         onEditHeader={() => setIsHeaderEditorOpen(true)}
+        onExportHtml={() => setIsExportModalOpen(true)}
       />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-8 -mt-6 relative z-20 space-y-6">
@@ -292,6 +297,14 @@ export default function App() {
         totalCount={membranes.length}
         onConfirm={handleConfirmDelete}
         onClose={() => setIsDeleteModalOpen(false)}
+      />
+
+      {/* Export HTML Modal */}
+      <ExportModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        membranes={membranes}
+        currentMembrane={currentMembrane}
       />
 
       {/* Photo Lightbox */}

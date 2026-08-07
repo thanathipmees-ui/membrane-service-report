@@ -8,6 +8,7 @@ interface MastheadProps {
   headerConfig?: HeaderConfig;
   onNewReport: () => void;
   onEditHeader: () => void;
+  onExportHtml: () => void;
 }
 
 export const Masthead: React.FC<MastheadProps> = ({
@@ -15,6 +16,7 @@ export const Masthead: React.FC<MastheadProps> = ({
   headerConfig,
   onNewReport,
   onEditHeader,
+  onExportHtml,
 }) => {
   const passCount = membranes.filter(m => m.status === 'PASS').length;
   const remarkCount = membranes.filter(m => m.status === 'REMARK').length;
@@ -79,7 +81,7 @@ export const Masthead: React.FC<MastheadProps> = ({
             </button>
 
             <button
-              onClick={() => exportHtmlFile(membranes, headerConfig)}
+              onClick={onExportHtml}
               className="inline-flex items-center gap-1.5 bg-white/15 hover:bg-white/25 text-white font-medium text-xs px-3 py-2.5 rounded-xl border border-white/20 transition-all cursor-pointer"
               title="ดาวน์โหลดไฟล์รายงานแบบ HTML"
             >

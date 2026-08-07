@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Upload, Trash2, CheckCircle, Image as ImageIcon, Calculator, Info, Building2 } from 'lucide-react';
+import { X, Upload, Trash2, CheckCircle, Image as ImageIcon, Calculator, Info, Building2, Calendar, Plus } from 'lucide-react';
 import { MembraneData, MembraneStatus, TestMetrics, TestCycle, HeaderConfig } from '../types';
 import { calculateRecovery, calculateRejection, metricDefs } from '../utils/calculations';
 
@@ -36,13 +36,13 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
   const [position, setPosition] = useState<string | number>(initialData.location?.position || 1);
   const [note, setNote] = useState<string>(initialData.note || '');
 
-  const latestCycle = initialData.cycles && initialData.cycles.length > 0
-    ? initialData.cycles[initialData.cycles.length - 1]
-    : { date: '10 June 2026', before: {}, after: {} };
+  // Cycles history state
+  const [cyclesList, setCyclesList] = useState<TestCycle[]>([]);
+  const [activeCycleIndex, setActiveCycleIndex] = useState<number>(0);
 
-  const [date, setDate] = useState<string>(latestCycle.date || '10 June 2026');
-  const [before, setBefore] = useState<TestMetrics>({ ...latestCycle.before });
-  const [after, setAfter] = useState<TestMetrics>({ ...latestCycle.after });
+  const [date, setDate] = useState<string>('10 June 2026');
+  const [before, setBefore] = useState<TestMetrics>({});
+  const [after, setAfter] = useState<TestMetrics>({});
 
   const [chartImage, setChartImage] = useState<string>(initialData.chartImage || '');
   const [beforeImages, setBeforeImages] = useState<string[]>(initialData.images?.before ? [...initialData.images.before] : []);
@@ -74,18 +74,106 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
       setPosition(initialData.location?.position || 1);
       setNote(initialData.note || (initialData.status === 'PASS' ? 'ผ่านการตรวจสอบตามรายงาน' : 'พบรอยแตกร้าวบริเวณหัว'));
 
-      const cycle = initialData.cycles && initialData.cycles.length > 0
-        ? initialData.cycles[initialData.cycles.length - 1]
-        : { date: '10 June 2026', before: {}, after: {} };
+      // Populate cycles history list
+      const initialCycles = (initialData.cycles && initialData.cycles.length > 0)
+        ? initialData.cycles.map(c => ({
+            id: c.id,
+            date: c.date || '10 June 2026',
+            before: { ...c.before },
+            after: { ...c.after }
+          }))
+        : [{ date: '10 June 2026', before: {}, after: {} }];
 
-      setDate(cycle.date || '10 June 2026');
-      setBefore({ ...cycle.before });
-      setAfter({ ...cycle.after });
+      setCyclesList(initialCycles);
+      const activeIdx = initialCycles.length - 1;
+      setActiveCycleIndex(activeIdx);
+
+      const activeCyc = initialCycles[activeIdx];
+      setDate(activeCyc.date || '10 June 2026');
+      setBefore({ ...activeCyc.before });
+      setAfter({ ...activeCyc.after });
+
       setChartImage(initialData.chartImage || '');
       setBeforeImages(initialData.images?.before ? [...initialData.images.before] : []);
       setAfterImages(initialData.images?.after ? [...initialData.images.after] : []);
     }
   }, [isOpen, initialData, headerConfig]);
+
+  // Handle switching active cycle tab
+  const handleSelectCycle = (targetIdx: number) => {
+    if (targetIdx === activeCycleIndex) return;
+
+    // Save current active cycle first
+    setCyclesList(prev => {
+      const next = [...prev];
+      if (next[activeCycleIndex]) {
+        next[activeCycleIndex] = { date, before, after };
+      }
+      return next;
+    });
+
+    setActiveCycleIndex(targetIdx);
+    const targetCyc = cyclesList[targetIdx];
+    if (targetCyc) {
+      setDate(targetCyc.date || '');
+      setBefore({ ...targetCyc.before });
+      setAfter({ ...targetCyc.after });
+    }
+  };
+
+  // Handle adding a new cycle date
+  const handleAddCycle = () => {
+    // 1. Sync current active cycle to list
+    const currentList = [...cyclesList];
+    if (currentList[activeCycleIndex]) {
+      currentList[activeCycleIndex] = { date, before, after };
+    }
+
+    // 2. Prepare new cycle date
+    const lastCycle = currentList[currentList.length - 1] || { before: {}, after: {} };
+    const newDate = `15 August 2026`;
+
+    const newCycle: TestCycle = {
+      date: newDate,
+      before: { ...lastCycle.after }, // Start before as last after metrics
+      after: { ...lastCycle.after }
+    };
+
+    const updatedList = [...currentList, newCycle];
+
+    // Keep up to 3 latest cycles for display/trend graph
+    const finalCycles = updatedList.slice(-3);
+    const newIdx = finalCycles.length - 1;
+
+    setCyclesList(finalCycles);
+    setActiveCycleIndex(newIdx);
+    setDate(newCycle.date);
+    setBefore(newCycle.before);
+    setAfter(newCycle.after);
+  };
+
+  // Handle deleting a cycle
+  const handleDeleteCycle = (indexToDelete: number) => {
+    if (cyclesList.length <= 1) return;
+
+    const currentList = [...cyclesList];
+    if (currentList[activeCycleIndex]) {
+      currentList[activeCycleIndex] = { date, before, after };
+    }
+
+    const updatedList = currentList.filter((_, idx) => idx !== indexToDelete);
+    const newIdx = Math.min(activeCycleIndex, updatedList.length - 1);
+
+    setCyclesList(updatedList);
+    setActiveCycleIndex(newIdx);
+
+    const activeCyc = updatedList[newIdx];
+    if (activeCyc) {
+      setDate(activeCyc.date || '');
+      setBefore({ ...activeCyc.before });
+      setAfter({ ...activeCyc.after });
+    }
+  };
 
   // Auto calculate recovery & rejection when inputs change if autoCalc is enabled
   useEffect(() => {
@@ -99,13 +187,32 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
     const aRec = calculateRecovery(after.inletFlow, after.concentrateFlow);
     const aRej = calculateRejection(after.permeateConductivity, after.rawWaterConductivity);
 
-    if (bRec !== null) setBefore(prev => ({ ...prev, recovery: bRec }));
-    if (bRej !== null) setBefore(prev => ({ ...prev, rejection: bRej }));
+    let updatedBefore = { ...before };
+    let updatedAfter = { ...after };
+    let changed = false;
 
-    if (aRec !== null) setAfter(prev => ({ ...prev, recovery: aRec }));
-    if (aRej !== null) setAfter(prev => ({ ...prev, rejection: aRej }));
+    if (bRec !== null && bRec !== before.recovery) { updatedBefore.recovery = bRec; changed = true; }
+    if (bRej !== null && bRej !== before.rejection) { updatedBefore.rejection = bRej; changed = true; }
+    if (aRec !== null && aRec !== after.recovery) { updatedAfter.recovery = aRec; changed = true; }
+    if (aRej !== null && aRej !== after.rejection) { updatedAfter.rejection = aRej; changed = true; }
+
+    if (changed) {
+      setBefore(updatedBefore);
+      setAfter(updatedAfter);
+      setCyclesList(prev => {
+        const next = [...prev];
+        if (next[activeCycleIndex]) {
+          next[activeCycleIndex] = {
+            ...next[activeCycleIndex],
+            before: updatedBefore,
+            after: updatedAfter
+          };
+        }
+        return next;
+      });
+    }
   }, [
-    autoCalc,
+    autoCalc, activeCycleIndex,
     before.inletFlow, before.concentrateFlow, before.permeateConductivity, before.rawWaterConductivity,
     after.inletFlow, after.concentrateFlow, after.permeateConductivity, after.rawWaterConductivity
   ]);
@@ -228,25 +335,18 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Preserve existing cycles if editing, or create new cycle list
-    const existingCycles = initialData.cycles ? [...initialData.cycles] : [];
-    let updatedCycles: TestCycle[];
-
-    if (mode === 'edit' && existingCycles.length > 0) {
-      // Replace or update the last cycle
-      existingCycles[existingCycles.length - 1] = {
-        date,
-        before,
-        after
-      };
-      updatedCycles = existingCycles;
+    // Ensure current active cycle is up to date in cyclesList
+    const finalCyclesList = [...cyclesList];
+    if (finalCyclesList[activeCycleIndex]) {
+      finalCyclesList[activeCycleIndex] = { date, before, after };
     } else {
-      // New report or initial cycle
-      updatedCycles = [
-        ...existingCycles.filter(c => c.date !== date),
-        { date, before, after }
-      ];
+      finalCyclesList.push({ date, before, after });
     }
+
+    // Filter valid non-empty cycles
+    const validCycles = finalCyclesList.filter(c => c && c.date && c.date.trim().length > 0);
+    // Keep up to 3 latest cycles as requested
+    const cyclesToSave = validCycles.length > 0 ? validCycles.slice(-3) : [{ date, before, after }];
 
     const updatedHeaderConfig: HeaderConfig = {
       companyName: companyName.trim() || 'Lion Corporation (Thailand) Limited',
@@ -267,7 +367,7 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
         position: position
       },
       headerConfig: updatedHeaderConfig,
-      cycles: updatedCycles,
+      cycles: cyclesToSave,
       chartImage,
       images: {
         before: beforeImages.filter(Boolean),
@@ -466,12 +566,18 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
             </div>
           </div>
 
-          {/* Section 2: Test Cycle & Values */}
+          {/* Section 2: Test Cycle & Values History */}
           <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
-              <h4 className="font-extrabold text-blue-900 uppercase tracking-wider text-xs">
-                2. ผลการทดสอบรอบล่าสุด (Test Cycle Values)
-              </h4>
+              <div>
+                <h4 className="font-extrabold text-blue-900 uppercase tracking-wider text-xs flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-blue-600" />
+                  <span>2. ผลการทดสอบและประวัติวันที่ล้าง (Test Cycles & History)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  ระบบบันทึกประวัติการล้างสะสม 3 ครั้งล่าสุด เพื่อนำไปสร้างกราฟแนวโน้ม Performance และแสดงประวัติในรายงาน
+                </p>
+              </div>
 
               <div className="flex items-center gap-2">
                 <button
@@ -485,14 +591,93 @@ export const ReportEditorModal: React.FC<ReportEditorModalProps> = ({
               </div>
             </div>
 
-            <div className="w-full sm:w-1/3">
-              <label className="block text-xs font-bold text-slate-700 mb-1">วันที่ทดสอบ (Date)</label>
+            {/* Cycle Tabs Selector */}
+            <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-extrabold text-slate-700">
+                  ประวัติรอบการทดสอบ (สับเปลี่ยนเพื่อแก้ไข หรือกดเพิ่มรอบใหม่):
+                </span>
+                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                  ทั้งหมด {cyclesList.length} รอบ (บันทึก 3 ครั้งล่าสุด)
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {cyclesList.map((cyc, idx) => {
+                  const isActive = idx === activeCycleIndex;
+                  const isLatest = idx === cyclesList.length - 1;
+
+                  return (
+                    <div key={idx} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectCycle(idx)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                        }`}
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>
+                          รอบที่ {idx + 1}: {cyc.date || 'ระบุวันที่'}
+                        </span>
+                        {isLatest && (
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-extrabold uppercase ${
+                            isActive ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            ล่าสุด
+                          </span>
+                        )}
+                      </button>
+
+                      {cyclesList.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCycle(idx)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-all cursor-pointer"
+                          title="ลบประวัติรอบนี้"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <button
+                  type="button"
+                  onClick={handleAddCycle}
+                  className="inline-flex items-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs px-3 py-1.5 rounded-xl transition-all cursor-pointer shadow-sm"
+                >
+                  <Plus className="w-4 h-4 text-emerald-600" />
+                  <span>+ เพิ่มรอบการล้าง/วันที่ใหม่</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Active Cycle Input */}
+            <div className="w-full sm:w-1/2">
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                วันที่ทดสอบรอบที่ {activeCycleIndex + 1} (Date) *
+              </label>
               <input
                 type="text"
+                required
                 value={date}
-                onChange={e => setDate(e.target.value)}
-                placeholder="เช่น 10 June 2026"
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-medium text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                onChange={e => {
+                  const val = e.target.value;
+                  setDate(val);
+                  setCyclesList(prev => {
+                    const next = [...prev];
+                    if (next[activeCycleIndex]) {
+                      next[activeCycleIndex] = { ...next[activeCycleIndex], date: val };
+                    }
+                    return next;
+                  });
+                }}
+                placeholder="เช่น 10 June 2026 หรือ 15 August 2026"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-bold text-blue-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
               />
             </div>
 
