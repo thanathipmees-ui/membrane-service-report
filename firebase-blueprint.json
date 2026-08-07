@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "membranes": {
+      "title": "Membranes",
+      "description": "RO4 Pass1 Membrane Cleaning Service Reports",
+      "type": "object",
+      "properties": {
+        "membraneNo": {
+          "type": "number",
+          "description": "Membrane sequence number"
+        },
+        "serialNumber": {
+          "type": "string",
+          "description": "Membrane serial number"
+        },
+        "brandModel": {
+          "type": "string",
+          "description": "Membrane brand and model"
+        },
+        "status": {
+          "type": "string",
+          "description": "Status PASS or REMARK"
+        },
+        "note": {
+          "type": "string",
+          "description": "Notes or remarks"
+        },
+        "location": {
+          "type": "object",
+          "description": "Vessel and position location"
+        },
+        "headerConfig": {
+          "type": "object",
+          "description": "Custom company header and job configuration"
+        },
+        "cycles": {
+          "type": "array",
+          "description": "Test history cycles"
+        },
+        "chartImage": {
+          "type": "string",
+          "description": "Chart image path or base64"
+        },
+        "images": {
+          "type": "object",
+          "description": "Before and after photo lists"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Last updated timestamp"
+        }
+      },
+      "required": ["membraneNo", "serialNumber", "status"]
+    }
+  }
+}

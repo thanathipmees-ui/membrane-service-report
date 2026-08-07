@@ -11,55 +11,51 @@ import { HeaderEditorModal } from './components/HeaderEditorModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
 import { ExportModal } from './components/ExportModal';
-
-const LOCAL_STORAGE_KEY = 'lion_ro4_pass1_membranes_v2';
-const HEADER_CONFIG_KEY = 'lion_ro4_header_config_v1';
+import {
+  subscribeMembranes,
+  saveMembraneToCloud,
+  deleteMembraneFromCloud
+} from './services/membraneService';
 
 export default function App() {
-  const [membranes, setMembranes] = useState<MembraneData[]>(() => {
-    let loaded = initialMembranes;
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          loaded = parsed;
-        }
-      }
-    } catch (err) {
-      console.error('Error loading stored membranes:', err);
-    }
-    // Deep copy headerConfig for every membrane so each report's company name & job info is completely independent
-    return loaded.map(m => ({
-      ...m,
-      headerConfig: m.headerConfig ? { ...m.headerConfig } : { ...defaultHeaderConfig }
-    }));
-  });
+  const [membranes, setMembranes] = useState<MembraneData[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [filterStatus, setFilterStatus] = useState<'ALL' | MembraneStatus>('ALL');
 
+  // Subscribe to real-time Firestore database updates
+  useEffect(() => {
+    setIsLoading(true);
+    const unsubscribe = subscribeMembranes(
+      (data) => {
+        setMembranes(data);
+        setIsLoading(false);
+        setIsCloudConnected(true);
+      },
+      (err) => {
+        console.error('Firestore sync error:', err);
+        setIsLoading(false);
+        setIsCloudConnected(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
+
   // Filtered dataset based on status pill
-  const filteredMembranes = membranes.filter(m => {
+  const filteredMembranes = membranes.filter((m) => {
     if (filterStatus === 'ALL') return true;
     return m.status === filterStatus;
   });
 
   // Clamp current index within valid bounds
   useEffect(() => {
-    if (currentIndex >= filteredMembranes.length) {
+    if (currentIndex >= filteredMembranes.length && filteredMembranes.length > 0) {
       setCurrentIndex(Math.max(0, filteredMembranes.length - 1));
     }
   }, [filteredMembranes.length, currentIndex]);
-
-  // Persist membranes to local storage
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(membranes));
-    } catch (err) {
-      console.error('Error saving membranes to localStorage:', err);
-    }
-  }, [membranes]);
 
   // Modal editor state
   const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
@@ -93,7 +89,7 @@ export default function App() {
   const activeHeaderConfig = getMembraneHeader(currentMembrane);
 
   const handleNewReportClick = () => {
-    const nextNo = membranes.length > 0 ? Math.max(...membranes.map(m => Number(m.membraneNo) || 0)) + 1 : 1;
+    const nextNo = membranes.length > 0 ? Math.max(...membranes.map((m) => Number(m.membraneNo) || 0)) + 1 : 1;
     const baseHeader = activeHeaderConfig ? { ...activeHeaderConfig } : { ...defaultHeaderConfig };
 
     const newBlankMembrane: MembraneData = {
@@ -130,37 +126,40 @@ export default function App() {
     setIsEditorOpen(true);
   };
 
-  const handleSaveReport = (savedData: MembraneData, newHeaderConfig?: HeaderConfig) => {
+  const handleSaveReport = async (savedData: MembraneData, newHeaderConfig?: HeaderConfig) => {
     const finalHeader = newHeaderConfig || savedData.headerConfig || activeHeaderConfig;
     const membraneToSave: MembraneData = {
       ...savedData,
-      headerConfig: finalHeader,
+      headerConfig: finalHeader
     };
 
-    if (editorMode === 'new') {
-      const updatedList = [...membranes, membraneToSave];
-      setMembranes(updatedList);
-      // Switch filter to ALL and navigate to the newly added membrane
-      setFilterStatus('ALL');
-      const newIdx = updatedList.length - 1;
-      setCurrentIndex(newIdx);
-      showToast(`สร้างรายงาน Membrane No. ${membraneToSave.membraneNo} สำเร็จเรียบร้อย!`);
-    } else {
-      const updatedList = membranes.map(m => m.membraneNo === membraneToSave.membraneNo ? membraneToSave : m);
-      setMembranes(updatedList);
-      showToast(`บันทึกการแก้ไข Membrane No. ${membraneToSave.membraneNo} สำเร็จ!`);
+    try {
+      await saveMembraneToCloud(membraneToSave);
+      if (editorMode === 'new') {
+        setFilterStatus('ALL');
+        showToast(`บันทึกรายงาน Membrane No. ${membraneToSave.membraneNo} ลงคลาวด์สำเร็จ!`);
+      } else {
+        showToast(`อัปเดตรายงาน Membrane No. ${membraneToSave.membraneNo} บนคลาวด์สำเร็จ!`);
+      }
+    } catch (err) {
+      console.error('Save to cloud failed:', err);
+      showToast('เกิดข้อผิดพลาดในการบันทึกข้อมูลลงคลาวด์');
     }
 
     setIsEditorOpen(false);
   };
 
-  const handleSaveHeaderConfig = (newConfig: HeaderConfig) => {
+  const handleSaveHeaderConfig = async (newConfig: HeaderConfig) => {
     if (currentMembrane) {
       const updated = { ...currentMembrane, headerConfig: newConfig };
-      setMembranes(prev => prev.map(m => m.membraneNo === currentMembrane.membraneNo ? updated : m));
+      try {
+        await saveMembraneToCloud(updated);
+        showToast('อัปเดตข้อมูลหัวข้อลงคลาวด์เรียบร้อยแล้ว!');
+      } catch (err) {
+        console.error('Header save failed:', err);
+      }
     }
     setIsHeaderEditorOpen(false);
-    showToast('อัปเดตข้อมูลหัวข้อสำหรับรายงานนี้เรียบร้อยแล้ว!');
   };
 
   const handleDeleteCurrentClick = () => {
@@ -168,49 +167,39 @@ export default function App() {
     setIsDeleteModalOpen(true);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!currentMembrane) return;
     if (membranes.length <= 1) return;
 
     const targetNo = currentMembrane.membraneNo;
-    const updatedList = membranes.filter(m => m !== currentMembrane && m.membraneNo !== targetNo);
-    setMembranes(updatedList);
-
-    const remainingFiltered = filteredMembranes.filter(m => m !== currentMembrane && m.membraneNo !== targetNo);
-    if (remainingFiltered.length === 0) {
-      setFilterStatus('ALL');
-      setCurrentIndex(0);
-    } else {
-      setCurrentIndex(prev => Math.max(0, Math.min(prev, remainingFiltered.length - 1)));
-    }
-
-    setIsDeleteModalOpen(false);
-    showToast(`ลบรายงาน Membrane No. ${targetNo} เรียบร้อยแล้ว`);
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('คุณต้องการรีเซ็ตข้อมูลทั้งหมดกลับเป็นรายงานเริ่มต้น 30 รายการใช่หรือไม่?')) {
-      setMembranes(initialMembranes.map(m => ({ ...m, headerConfig: { ...defaultHeaderConfig } })));
-      setFilterStatus('ALL');
-      setCurrentIndex(0);
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
-      localStorage.removeItem(HEADER_CONFIG_KEY);
-      showToast('รีเซ็ตข้อมูลกลับเป็นเริ่มต้นแล้ว');
+    try {
+      await deleteMembraneFromCloud(targetNo);
+      setIsDeleteModalOpen(false);
+      showToast(`ลบรายงาน Membrane No. ${targetNo} บนคลาวด์เรียบร้อยแล้ว`);
+    } catch (err) {
+      console.error('Delete from cloud failed:', err);
+      showToast('เกิดข้อผิดพลาดในการลบข้อมูล');
     }
   };
 
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing inside an input/textarea or modal is open
-      if (isEditorOpen || isHeaderEditorOpen || isDeleteModalOpen || lightboxSrc || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (
+        isEditorOpen ||
+        isHeaderEditorOpen ||
+        isDeleteModalOpen ||
+        lightboxSrc ||
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
         return;
       }
 
       if (e.key === 'ArrowLeft') {
-        setCurrentIndex(prev => Math.max(0, prev - 1));
+        setCurrentIndex((prev) => Math.max(0, prev - 1));
       } else if (e.key === 'ArrowRight') {
-        setCurrentIndex(prev => Math.min(filteredMembranes.length - 1, prev + 1));
+        setCurrentIndex((prev) => Math.min(filteredMembranes.length - 1, prev + 1));
       }
     };
 
@@ -227,6 +216,17 @@ export default function App() {
         </div>
       )}
 
+      {/* Cloud Sync Status Indicator */}
+      <div className="bg-slate-900 text-slate-300 text-[11px] px-4 py-1.5 flex items-center justify-between border-b border-slate-800">
+        <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
+          <span className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+          <span className="font-semibold text-white">
+            {isCloudConnected ? 'Cloud Database Connected (Firebase Firestore)' : 'Connecting to Cloud Database...'}
+          </span>
+          <span className="text-slate-400 hidden sm:inline">&middot; ข้อมูลอัปเดตและซิงค์อัตโนมัติทุกเครื่องแบบ Real-Time</span>
+        </div>
+      </div>
+
       {/* Main Header / Masthead */}
       <Masthead
         membranes={membranes}
@@ -237,10 +237,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-8 -mt-6 relative z-20 space-y-6">
         {/* Job Info Metadata Bar */}
-        <JobMetaBar
-          totalCount={membranes.length}
-          headerConfig={activeHeaderConfig}
-        />
+        <JobMetaBar totalCount={membranes.length} headerConfig={activeHeaderConfig} />
 
         {/* Search & Navigation Toolbar */}
         <SearchAndToolbar
@@ -254,7 +251,12 @@ export default function App() {
         />
 
         {/* Membrane Detail Card View */}
-        {currentMembrane ? (
+        {isLoading ? (
+          <div className="bg-white rounded-3xl p-16 text-center text-slate-600 border border-slate-200 shadow-sm space-y-3">
+            <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="font-bold text-sm">กำลังโหลดและซิงค์ข้อมูลจากฐานข้อมูลคลาวด์...</p>
+          </div>
+        ) : currentMembrane ? (
           <MembraneDetail
             key={`membrane-${currentMembrane.membraneNo}`}
             membrane={currentMembrane}
