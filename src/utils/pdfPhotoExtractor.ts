@@ -10,6 +10,40 @@ export interface PagePhotos {
   fullPageImage?: string;
 }
 
+export interface PdfExtractedPage {
+  pageNumber: number;
+  text: string;
+}
+
+/**
+ * Extracts raw text from each page of a PDF file using pdfjs-dist
+ */
+export async function extractTextFromPdf(file: File): Promise<PdfExtractedPage[]> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    const numPages = pdfDoc.numPages;
+
+    const pagesText: PdfExtractedPage[] = [];
+
+    for (let i = 1; i <= numPages; i++) {
+      const page = await pdfDoc.getPage(i);
+      const textContent = await page.getTextContent();
+      const textItems = textContent.items.map((item: any) => item.str).join(' ');
+      pagesText.push({
+        pageNumber: i,
+        text: textItems
+      });
+    }
+
+    return pagesText;
+  } catch (err) {
+    console.warn('PDF text extraction warning:', err);
+    return [];
+  }
+}
+
 /**
  * Renders each page of a PDF file to a canvas and crops the Before & After picture regions
  */

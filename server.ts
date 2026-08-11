@@ -23,14 +23,10 @@ async function startServer() {
   // API Route: Parse PDF or Excel Document via Gemini AI
   app.post('/api/parse-document', async (req, res) => {
     try {
-      let { files, fileBase64, mimeType, fileName } = req.body;
+      let { files, pdfTexts, fileBase64, mimeType, fileName } = req.body;
 
       if (!files && fileBase64) {
         files = [{ fileBase64, mimeType, fileName }];
-      }
-
-      if (!files || !Array.isArray(files) || files.length === 0) {
-        return res.status(400).json({ error: 'กรุณาอัปโหลดอย่างน้อย 1 ไฟล์' });
       }
 
       const apiKey = process.env.GEMINI_API_KEY;
@@ -51,9 +47,10 @@ async function startServer() {
 
       const promptText = `
 คุณคือผู้เชี่ยวชาญด้านการวิเคราะห์เอกสารรายงานการล้างไส้กรองเมมเบรน RO (Reverse Osmosis Membrane Cleaning Service Report)
-โปรดอ่านเอกสาร PDF / รูปภาพ / รายงานบริการลูกค้าที่ผู้ใช้อัปโหลดทั้งหมด (อาจมี 1 หรือหลายไฟล์ เช่น ไฟล์รายงานรายท่อน และไฟล์รายงานสรุปบริการ/จัดเรียงผัง Vessel)
+โปรดอ่านเอกสาร PDF / รูปภาพ / รายงานบริการลูกค้าที่ผู้ใช้อัปโหลดทั้งหมด (รวมถึงข้อความที่สกัดจาก PDF หากมี)
 สกัดและประมวลผลข้อมูลร่วมกันทั้งหมดออกมาเป็นโครงสร้าง JSON ต่อไปนี้อย่างละเอียดและถูกต้อง 100%:
 
+ข้อกำหนดสำคัญ:
 1. companyName: ชื่อบริษัทลูกค้า เช่น "Lion Corporation (Thailand) Limited"
 2. roName: ชื่อระบบ RO หรือ Ref. JOB เช่น "RO2", "RO4 Pass 1" หรือ "RO2 (12 ท่อน)"
 3. membranes: รายการข้อมูลของไส้กรองเมมเบรนทุกท่อนที่อยู่ในเอกสาร (เช่น 1 ถึง 12 ท่อน หรือ 1 ถึง 30 ท่อน)
@@ -64,21 +61,31 @@ async function startServer() {
    - status: ผลลัพธ์ "PASS" หรือ "REMARK" (หากมีหมายเหตุเตือน เช่น รอยแตกร้าว รอยชำรุด Rejection ต่ำ หรือมี Remark ให้เป็น "REMARK" มิฉะนั้นเป็น "PASS")
    - note: หมายเหตุ เช่น "Membrane ที่ทำ Remark ไว้ ตรวจสอบพบว่ามีรอยแตกร้าวบริเวณหัว" หรือ "ผ่านการตรวจสอบตามรายงาน"
    - location: { vessel: เลข Vessel เช่น 1, 2, 3, position: ตำแหน่งใน Vessel เช่น 1, 2, 3, 4 } (หากมีผังจัดเรียงในเอกสาร ให้ดึงเลข vessel และ position มาใส่)
-   - cycles: อาร์เรย์ของรอบการทดสอบย้อนหลังทั้งหมด (Date Cleaning, Before / After)
+   - cycles: อาร์เรย์ของรอบการทดสอบย้อนหลังทั้งหมด (สำคัญมาก!! สกัดให้ครบทุกวันที่/ทุกรอบ เช่น สกัดครบทั้ง 3 วันคือ "11 February 2026", "11 May 2026", "4 August 2026")
      แต่ละรอบประกอบด้วย:
      - date: วันที่ เช่น "11 February 2026", "11 May 2026", "4 August 2026"
      - before: { inletPressure, concentratePressure, inletFlow, concentrateFlow, recovery, permeateConductivity, rawWaterConductivity, rejection }
      - after: { inletPressure, concentratePressure, inletFlow, concentrateFlow, recovery, permeateConductivity, rawWaterConductivity, rejection }
 
+${pdfTexts && pdfTexts.length > 0 ? `\n--- ข้อความสกัดจากเอกสาร PDF ---\n${pdfTexts.join('\n\n')}\n` : ''}
 โปรดส่งคืนเฉพาะ JSON ตาม Schema เท่านั้น
 `;
 
-      const contents: any[] = files.map((f: any) => ({
-        inlineData: {
-          mimeType: f.mimeType || 'application/pdf',
-          data: f.fileBase64.replace(/^data:[^;]+;base64,/, '')
+      const contents: any[] = [];
+
+      // Include base64 inlineData if provided
+      if (files && Array.isArray(files) && files.length > 0) {
+        for (const f of files) {
+          if (f.fileBase64) {
+            contents.push({
+              inlineData: {
+                mimeType: f.mimeType || 'application/pdf',
+                data: f.fileBase64.replace(/^data:[^;]+;base64,/, '')
+              }
+            });
+          }
         }
-      }));
+      }
 
       contents.push({ text: promptText });
 
@@ -86,6 +93,7 @@ async function startServer() {
         model: 'gemini-3.6-flash',
         contents,
         config: {
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
