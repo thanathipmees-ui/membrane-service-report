@@ -12,6 +12,7 @@ import { HeaderEditorModal } from './components/HeaderEditorModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
 import { ExportModal } from './components/ExportModal';
+import { ImportModal } from './components/ImportModal';
 import {
   subscribeCompanies,
   subscribeROSystems,
@@ -134,6 +135,9 @@ export default function App() {
 
   // Export HTML modal state
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
+
+  // Import PDF/Excel modal state
+  const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
 
   // Photo Lightbox state
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -337,6 +341,70 @@ export default function App() {
     setIsEditorOpen(false);
   };
 
+  const handleBatchImport = async (
+    targetCompanyName: string,
+    targetRoName: string,
+    importedMembranes: MembraneData[]
+  ) => {
+    let companyId = companies.find(
+      (c) => c.name.trim().toLowerCase() === targetCompanyName.trim().toLowerCase()
+    )?.id;
+
+    if (!companyId) {
+      companyId = `comp-${Date.now()}`;
+      const newCompany: Company = {
+        id: companyId,
+        name: targetCompanyName,
+        createdAt: new Date().toISOString()
+      };
+      await saveCompanyToCloud(newCompany);
+    }
+
+    let roId = roSystems.find(
+      (r) => r.companyId === companyId && r.name.trim().toLowerCase() === targetRoName.trim().toLowerCase()
+    )?.id;
+
+    if (!roId) {
+      roId = `ro-${Date.now()}`;
+      const newRo: ROSystem = {
+        id: roId,
+        companyId,
+        name: targetRoName,
+        headerConfig: {
+          ...defaultHeaderConfig,
+          companyName: targetCompanyName,
+          jobDescription: `Cleaning Membrane ${targetRoName}`,
+          reportTitle: `${targetRoName} Membrane Cleaning Report`
+        },
+        createdAt: new Date().toISOString()
+      };
+      await saveROSystemToCloud(newRo);
+    }
+
+    const headerConfig: HeaderConfig = {
+      ...defaultHeaderConfig,
+      companyName: targetCompanyName,
+      jobDescription: `Cleaning Membrane ${targetRoName}`,
+      reportTitle: `${targetRoName} Membrane Cleaning Report`
+    };
+
+    for (const m of importedMembranes) {
+      const membraneToSave: MembraneData = {
+        ...m,
+        companyId,
+        roId,
+        headerConfig
+      };
+      await saveMembraneToCloud(membraneToSave);
+    }
+
+    setActiveCompanyId(companyId);
+    setActiveRoId(roId);
+    setFilterStatus('ALL');
+    setCurrentIndex(0);
+    showToast(`นำเข้าข้อมูล ${importedMembranes.length} ท่อนสำหรับ "${targetCompanyName} > ${targetRoName}" สำเร็จ!`);
+  };
+
   const handleSaveHeaderConfig = async (newConfig: HeaderConfig) => {
     if (currentMembrane) {
       const updated = { ...currentMembrane, headerConfig: newConfig };
@@ -422,6 +490,7 @@ export default function App() {
         companyName={activeCompany?.name}
         roName={activeRo?.name}
         onNewReport={handleNewReportClick}
+        onImportClick={() => setIsImportModalOpen(true)}
         onExportHtml={() => setIsExportModalOpen(true)}
       />
 
@@ -525,6 +594,15 @@ export default function App() {
         onClose={() => setIsExportModalOpen(false)}
         membranes={membranes}
         currentMembrane={currentMembrane}
+      />
+
+      {/* Import PDF/Excel Modal */}
+      <ImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        companies={companies}
+        roSystems={roSystems}
+        onImportComplete={handleBatchImport}
       />
 
       {/* Photo Lightbox */}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { MembraneData, HeaderConfig } from '../types';
-import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText } from 'lucide-react';
+import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText, Upload } from 'lucide-react';
 
 interface MastheadProps {
   membranes: MembraneData[];
@@ -8,6 +8,7 @@ interface MastheadProps {
   companyName?: string;
   roName?: string;
   onNewReport: () => void;
+  onImportClick: () => void;
   onExportHtml: () => void;
 }
 
@@ -17,6 +18,7 @@ export const Masthead: React.FC<MastheadProps> = ({
   companyName,
   roName,
   onNewReport,
+  onImportClick,
   onExportHtml,
 }) => {
   const passCount = membranes.filter(m => m.status === 'PASS').length;
@@ -63,6 +65,14 @@ export const Masthead: React.FC<MastheadProps> = ({
               <AlertTriangle className="w-4 h-4 text-amber-400" />
               <span>REMARK <strong>{remarkCount}</strong></span>
             </div>
+
+            <button
+              onClick={onImportClick}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow-lg shadow-blue-900/40 transition-all transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <Upload className="w-4 h-4 stroke-[2.5]" />
+              <span>นำเข้า PDF/Excel</span>
+            </button>
 
             <button
               onClick={onNewReport}
