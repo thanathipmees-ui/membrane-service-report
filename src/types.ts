@@ -1,5 +1,19 @@
 export type MembraneStatus = 'PASS' | 'REMARK';
 
+export interface Company {
+  id: string;
+  name: string;
+  createdAt?: string;
+}
+
+export interface ROSystem {
+  id: string;
+  companyId: string;
+  name: string;
+  headerConfig?: HeaderConfig;
+  createdAt?: string;
+}
+
 export interface HeaderConfig {
   companyName: string;
   reportTitle: string;
@@ -37,6 +51,9 @@ export interface MembraneImages {
 }
 
 export interface MembraneData {
+  id?: string;
+  companyId?: string;
+  roId?: string;
   membraneNo: number;
   serialNumber: string;
   brandModel: string;

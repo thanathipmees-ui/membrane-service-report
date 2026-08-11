@@ -1,54 +1,47 @@
 {
   "entities": {
-    "membranes": {
-      "title": "Membranes",
-      "description": "RO4 Pass1 Membrane Cleaning Service Reports",
+    "companies": {
+      "title": "Companies",
+      "description": "Client companies / customers",
       "type": "object",
       "properties": {
-        "membraneNo": {
-          "type": "number",
-          "description": "Membrane sequence number"
-        },
-        "serialNumber": {
-          "type": "string",
-          "description": "Membrane serial number"
-        },
-        "brandModel": {
-          "type": "string",
-          "description": "Membrane brand and model"
-        },
-        "status": {
-          "type": "string",
-          "description": "Status PASS or REMARK"
-        },
-        "note": {
-          "type": "string",
-          "description": "Notes or remarks"
-        },
-        "location": {
-          "type": "object",
-          "description": "Vessel and position location"
-        },
-        "headerConfig": {
-          "type": "object",
-          "description": "Custom company header and job configuration"
-        },
-        "cycles": {
-          "type": "array",
-          "description": "Test history cycles"
-        },
-        "chartImage": {
-          "type": "string",
-          "description": "Chart image path or base64"
-        },
-        "images": {
-          "type": "object",
-          "description": "Before and after photo lists"
-        },
-        "updatedAt": {
-          "type": "string",
-          "description": "Last updated timestamp"
-        }
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ro_systems": {
+      "title": "RO Systems",
+      "description": "RO Systems per company e.g. RO1 to RO5",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyId": { "type": "string" },
+        "name": { "type": "string" },
+        "headerConfig": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "companyId", "name"]
+    },
+    "membranes": {
+      "title": "Membranes",
+      "description": "Membrane Cleaning Service Reports",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "roId": { "type": "string" },
+        "membraneNo": { "type": "number" },
+        "serialNumber": { "type": "string" },
+        "brandModel": { "type": "string" },
+        "status": { "type": "string" },
+        "note": { "type": "string" },
+        "location": { "type": "object" },
+        "headerConfig": { "type": "object" },
+        "cycles": { "type": "array" },
+        "chartImage": { "type": "string" },
+        "images": { "type": "object" },
+        "updatedAt": { "type": "string" }
       },
       "required": ["membraneNo", "serialNumber", "status"]
     }

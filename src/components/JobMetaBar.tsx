@@ -5,11 +5,20 @@ import { HeaderConfig } from '../types';
 interface JobMetaBarProps {
   totalCount: number;
   headerConfig?: HeaderConfig;
+  companyName?: string;
+  roName?: string;
 }
 
-export const JobMetaBar: React.FC<JobMetaBarProps> = ({ totalCount, headerConfig }) => {
-  const companyName = headerConfig?.companyName || 'Lion Corporation (Thailand) Limited';
-  const jobDescription = headerConfig?.jobDescription || 'Cleaning Membrane RO4 Pass1';
+export const JobMetaBar: React.FC<JobMetaBarProps> = ({
+  totalCount,
+  headerConfig,
+  companyName,
+  roName,
+}) => {
+  const displayCompany = companyName || headerConfig?.companyName || 'Lion Corporation (Thailand) Limited';
+  const displayJob = roName
+    ? `Cleaning Membrane ${roName}`
+    : headerConfig?.jobDescription || 'Cleaning Membrane RO4 Pass1';
   const servicePeriod = headerConfig?.servicePeriod || '10-16 June 2026';
 
   return (
@@ -20,7 +29,7 @@ export const JobMetaBar: React.FC<JobMetaBarProps> = ({ totalCount, headerConfig
         </div>
         <div>
           <span className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Customer / บริษัท</span>
-          <strong className="block text-sm font-bold text-slate-900 mt-0.5">{companyName}</strong>
+          <strong className="block text-sm font-bold text-slate-900 mt-0.5">{displayCompany}</strong>
         </div>
       </div>
 
@@ -30,7 +39,7 @@ export const JobMetaBar: React.FC<JobMetaBarProps> = ({ totalCount, headerConfig
         </div>
         <div>
           <span className="block text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Job Description / ชื่องาน</span>
-          <strong className="block text-sm font-bold text-slate-900 mt-0.5">{jobDescription}</strong>
+          <strong className="block text-sm font-bold text-slate-900 mt-0.5">{displayJob}</strong>
         </div>
       </div>
 

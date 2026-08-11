@@ -5,6 +5,8 @@ import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText } from 'l
 interface MastheadProps {
   membranes: MembraneData[];
   headerConfig?: HeaderConfig;
+  companyName?: string;
+  roName?: string;
   onNewReport: () => void;
   onExportHtml: () => void;
 }
@@ -12,6 +14,8 @@ interface MastheadProps {
 export const Masthead: React.FC<MastheadProps> = ({
   membranes,
   headerConfig,
+  companyName,
+  roName,
   onNewReport,
   onExportHtml,
 }) => {
@@ -19,8 +23,8 @@ export const Masthead: React.FC<MastheadProps> = ({
   const remarkCount = membranes.filter(m => m.status === 'REMARK').length;
 
   const subtitle = headerConfig?.reportSubtitle || 'Service Report';
-  const title = headerConfig?.reportTitle || 'RO4 Pass1 Membrane Cleaning Report';
-  const company = headerConfig?.companyName || 'Lion Corporation (Thailand) Limited';
+  const title = roName ? `${roName} Membrane Cleaning Report` : (headerConfig?.reportTitle || 'RO Membrane Cleaning Report');
+  const company = companyName || headerConfig?.companyName || 'Lion Corporation (Thailand) Limited';
 
   return (
     <header className="relative overflow-hidden bg-gradient-to-r from-[#0b1b35] via-[#0f3970] to-[#156dd1] text-white px-4 sm:px-8 py-8 shadow-xl">
