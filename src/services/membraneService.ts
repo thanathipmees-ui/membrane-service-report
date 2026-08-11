@@ -401,28 +401,45 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   setCachedMembranes(cachedMems);
 
   try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, COMPANIES_COL, companyId));
+    await deleteDoc(doc(db, COMPANIES_COL, companyId));
+  } catch (err) {
+    console.warn('Cloud delete company doc failed (deleted locally):', err);
+  }
 
+  try {
     const roSnapshot = await getDocs(collection(db, RO_SYSTEMS_COL));
+    const batch = writeBatch(db);
+    let count = 0;
     roSnapshot.forEach((docSnap) => {
       const data = docSnap.data() as ROSystem;
       if (data.companyId === companyId) {
         batch.delete(docSnap.ref);
+        count++;
       }
     });
+    if (count > 0) {
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn('Cloud delete company RO systems failed:', err);
+  }
 
+  try {
     const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
+    const batch = writeBatch(db);
+    let count = 0;
     memSnapshot.forEach((docSnap) => {
       const data = docSnap.data() as MembraneData;
       if (data.companyId === companyId) {
         batch.delete(docSnap.ref);
+        count++;
       }
     });
-
-    await batch.commit();
+    if (count > 0) {
+      await batch.commit();
+    }
   } catch (err) {
-    console.warn('Cloud delete company failed (deleted locally):', err);
+    console.warn('Cloud delete company membranes failed:', err);
   }
 }
 
@@ -463,20 +480,27 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
   setCachedMembranes(cachedMems);
 
   try {
-    const batch = writeBatch(db);
-    batch.delete(doc(db, RO_SYSTEMS_COL, roId));
+    await deleteDoc(doc(db, RO_SYSTEMS_COL, roId));
+  } catch (err) {
+    console.warn('Cloud delete RO system doc failed (deleted locally):', err);
+  }
 
+  try {
     const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
+    const batch = writeBatch(db);
+    let count = 0;
     memSnapshot.forEach((docSnap) => {
       const data = docSnap.data() as MembraneData;
       if (data.roId === roId) {
         batch.delete(docSnap.ref);
+        count++;
       }
     });
-
-    await batch.commit();
+    if (count > 0) {
+      await batch.commit();
+    }
   } catch (err) {
-    console.warn('Cloud delete RO system failed (deleted locally):', err);
+    console.warn('Cloud delete RO membranes failed:', err);
   }
 }
 

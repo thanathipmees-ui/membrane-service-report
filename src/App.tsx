@@ -196,10 +196,12 @@ export default function App() {
     };
 
     try {
-      await saveCompanyToCloud(newComp);
-      await saveROSystemToCloud(initialRo);
+      setCompanies((prev) => [...prev, newComp]);
+      setRoSystems([initialRo]);
       setActiveCompanyId(newCompanyId);
       setActiveRoId(initialRoId);
+      await saveCompanyToCloud(newComp);
+      await saveROSystemToCloud(initialRo);
       showToast(`สร้างบริษัท "${name}" สำเร็จ!`);
     } catch (err) {
       console.error('Error adding company:', err);
@@ -213,11 +215,12 @@ export default function App() {
       return;
     }
     try {
-      await deleteCompanyFromCloud(companyId);
       const remaining = companies.filter((c) => c.id !== companyId);
+      setCompanies(remaining);
       if (remaining.length > 0) {
         setActiveCompanyId(remaining[0].id);
       }
+      await deleteCompanyFromCloud(companyId);
       showToast('ลบบริษัทเรียบร้อยแล้ว');
     } catch (err) {
       console.error('Error deleting company:', err);
@@ -243,8 +246,9 @@ export default function App() {
     };
 
     try {
-      await saveROSystemToCloud(newRo);
+      setRoSystems((prev) => [...prev, newRo]);
       setActiveRoId(newRoId);
+      await saveROSystemToCloud(newRo);
       showToast(`สร้างระบบ RO "${name}" สำเร็จ!`);
     } catch (err) {
       console.error('Error adding RO:', err);
@@ -258,11 +262,12 @@ export default function App() {
       return;
     }
     try {
-      await deleteROSystemFromCloud(roId);
       const remaining = roSystems.filter((r) => r.id !== roId);
+      setRoSystems(remaining);
       if (remaining.length > 0) {
         setActiveRoId(remaining[0].id);
       }
+      await deleteROSystemFromCloud(roId);
       showToast('ลบระบบ RO เรียบร้อยแล้ว');
     } catch (err) {
       console.error('Error deleting RO:', err);
@@ -331,16 +336,31 @@ export default function App() {
     };
 
     try {
+      setMembranes((prev) => {
+        const idx = prev.findIndex(
+          (m) =>
+            m.id === membraneToSave.id ||
+            (m.companyId === membraneToSave.companyId &&
+              m.roId === membraneToSave.roId &&
+              m.membraneNo === membraneToSave.membraneNo)
+        );
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = membraneToSave;
+          return updated;
+        }
+        return [...prev, membraneToSave];
+      });
       await saveMembraneToCloud(membraneToSave);
       if (editorMode === 'new') {
         setFilterStatus('ALL');
         showToast(`บันทึกรายงาน Membrane No. ${membraneToSave.membraneNo} (${activeRo?.name}) สำเร็จ!`);
       } else {
-        showToast(`อัปเดตรายงาน Membrane No. ${membraneToSave.membraneNo} บนคลาวด์สำเร็จ!`);
+        showToast(`อัปเดตรายงาน Membrane No. ${membraneToSave.membraneNo} สำเร็จ!`);
       }
     } catch (err) {
       console.error('Save to cloud failed:', err);
-      showToast('เกิดข้อผิดพลาดในการบันทึกข้อมูลลงคลาวด์');
+      showToast('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     }
 
     setIsEditorOpen(false);
@@ -434,9 +454,10 @@ export default function App() {
     const targetId = currentMembrane.id || `${activeCompanyId}_${activeRoId}_${currentMembrane.membraneNo}`;
     const targetNo = currentMembrane.membraneNo;
     try {
-      await deleteMembraneFromCloud(targetId, activeCompanyId, activeRoId, targetNo);
+      setMembranes((prev) => prev.filter((m) => m.id !== targetId && m.membraneNo !== targetNo));
       setIsDeleteModalOpen(false);
-      showToast(`ลบรายงาน Membrane No. ${targetNo} บนคลาวด์เรียบร้อยแล้ว`);
+      await deleteMembraneFromCloud(targetId, activeCompanyId, activeRoId, targetNo);
+      showToast(`ลบรายงาน Membrane No. ${targetNo} เรียบร้อยแล้ว`);
     } catch (err) {
       console.error('Delete from cloud failed:', err);
       showToast('เกิดข้อผิดพลาดในการลบข้อมูล');
