@@ -163,7 +163,29 @@ ${pdfTexts && pdfTexts.length > 0 ? `\n--- ข้อความสกัดจ�
       });
 
       const jsonText = response.text || '{}';
-      const parsedData = JSON.parse(jsonText);
+      let parsedData: any = null;
+      try {
+        parsedData = JSON.parse(jsonText);
+      } catch (parseErr) {
+        console.warn('Gemini JSON response was truncated or malformed, attempting repair...');
+        let repairedText = jsonText.trim();
+        if ((repairedText.match(/"/g) || []).length % 2 !== 0) {
+          repairedText += '"';
+        }
+        const openBraces = (repairedText.match(/\{/g) || []).length - (repairedText.match(/\}/g) || []).length;
+        const openBrackets = (repairedText.match(/\[/g) || []).length - (repairedText.match(/\]/g) || []).length;
+
+        for (let i = 0; i < Math.max(0, openBrackets); i++) repairedText += ']';
+        for (let i = 0; i < Math.max(0, openBraces); i++) repairedText += '}';
+
+        try {
+          parsedData = JSON.parse(repairedText);
+        } catch (e2) {
+          console.warn('Failed to parse repaired JSON, sending null data for fallback parsing');
+          parsedData = null;
+        }
+      }
+
       res.json({ success: true, data: parsedData });
     } catch (err: any) {
       console.error('Error parsing document with Gemini:', err);
