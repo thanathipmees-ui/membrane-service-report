@@ -90,10 +90,10 @@ ${pdfTexts && pdfTexts.length > 0 ? `\n--- ข้อความสกัดจ�
       contents.push({ text: promptText });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model: 'gemini-2.5-flash',
         contents,
         config: {
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -169,9 +169,16 @@ ${pdfTexts && pdfTexts.length > 0 ? `\n--- ข้อความสกัดจ�
       } catch (parseErr) {
         console.warn('Gemini JSON response was truncated or malformed, attempting repair...');
         let repairedText = jsonText.trim();
+        
+        // Remove trailing commas before closing braces
+        repairedText = repairedText.replace(/,\s*([\}\]])/g, '$1');
+
+        // Close unterminated quotes
         if ((repairedText.match(/"/g) || []).length % 2 !== 0) {
           repairedText += '"';
         }
+
+        // Close unclosed brackets/braces
         const openBraces = (repairedText.match(/\{/g) || []).length - (repairedText.match(/\}/g) || []).length;
         const openBrackets = (repairedText.match(/\[/g) || []).length - (repairedText.match(/\]/g) || []).length;
 
@@ -181,7 +188,7 @@ ${pdfTexts && pdfTexts.length > 0 ? `\n--- ข้อความสกัดจ�
         try {
           parsedData = JSON.parse(repairedText);
         } catch (e2) {
-          console.warn('Failed to parse repaired JSON, sending null data for fallback parsing');
+          console.warn('Failed to parse repaired JSON:', e2);
           parsedData = null;
         }
       }

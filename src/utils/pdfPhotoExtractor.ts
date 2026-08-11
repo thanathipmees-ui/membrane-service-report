@@ -1,7 +1,11 @@
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Set worker source URL
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs`;
+// Set pdfjs worker source
+if (typeof window !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl || `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs`;
+}
 
 export interface PagePhotos {
   pageNumber: number;
@@ -67,10 +71,13 @@ export async function extractPhotosFromPdf(file: File): Promise<PagePhotos[]> {
       canvas.width = viewport.width;
       canvas.height = viewport.height;
 
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       await page.render({
         canvasContext: ctx,
-        viewport,
-        canvas
+        viewport: viewport,
+        canvas: canvas as HTMLCanvasElement
       }).promise;
 
       // Calculate bounding boxes for "Picture Before" and "Picture After"

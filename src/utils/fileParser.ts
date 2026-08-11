@@ -51,15 +51,30 @@ export async function parsePdfOrImageDocument(inputFiles: File | File[]): Promis
     }
   }
 
-  // 2. Extract Before & After photo crops from the multi-page per-piece PDF report
+  // 2. Extract Before & After photo crops from all multi-page PDF reports
   let extractedPagePhotos: PagePhotos[] = [];
-  const perPiecePdfFile = filesList.find((f) => f.type.includes('pdf') || f.name.toLowerCase().endsWith('.pdf'));
-
-  if (perPiecePdfFile) {
+  for (const pdfFile of pdfFiles) {
     try {
-      extractedPagePhotos = await extractPhotosFromPdf(perPiecePdfFile);
+      const pagePhotos = await extractPhotosFromPdf(pdfFile);
+      if (pagePhotos && pagePhotos.length > 0) {
+        extractedPagePhotos.push(...pagePhotos);
+      }
     } catch (e) {
-      console.warn('Could not extract photos directly from PDF canvas:', e);
+      console.warn('Could not extract photos directly from PDF canvas:', pdfFile.name, e);
+    }
+  }
+
+  // Also check for directly uploaded image files (e.g. before.jpg / after.jpg)
+  const uploadedImageFiles = filesList.filter(
+    (f) => f.type.startsWith('image/') || /\.(jpg|jpeg|png|webp)$/i.test(f.name)
+  );
+  const uploadedImageBase64s: string[] = [];
+  for (const imgFile of uploadedImageFiles) {
+    try {
+      const b64 = await fileToBase64(imgFile);
+      uploadedImageBase64s.push(b64);
+    } catch (e) {
+      console.warn('Could not convert uploaded image to base64:', imgFile.name, e);
     }
   }
 
@@ -178,10 +193,18 @@ export async function parsePdfOrImageDocument(inputFiles: File | File[]): Promis
     // Sort cycles chronologically
     parsedCycles.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    // Match photos from cropped PDF canvas
-    const pagePhoto = extractedPagePhotos[index] || extractedPagePhotos.find((p) => p.pageNumber === membraneNo);
-    const beforeImages: string[] = pagePhoto?.beforeImage ? [pagePhoto.beforeImage] : [];
-    const afterImages: string[] = pagePhoto?.afterImage ? [pagePhoto.afterImage] : [];
+    // Match photos from cropped PDF canvas or uploaded image files
+    const pagePhoto = extractedPagePhotos.find((p) => p.pageNumber === membraneNo) || extractedPagePhotos[index];
+    let beforeImages: string[] = pagePhoto?.beforeImage ? [pagePhoto.beforeImage] : [];
+    let afterImages: string[] = pagePhoto?.afterImage ? [pagePhoto.afterImage] : [];
+
+    // Fallback to uploaded direct image files if PDF canvas crop was empty
+    if (beforeImages.length === 0 && uploadedImageBase64s.length > 0) {
+      beforeImages = [uploadedImageBase64s[0]];
+      if (uploadedImageBase64s.length > 1) {
+        afterImages = [uploadedImageBase64s[1]];
+      }
+    }
 
     return {
       membraneNo,

@@ -46,9 +46,12 @@ export default function App() {
       (data) => {
         setCompanies(data);
         setIsCloudConnected(true);
-        if (data.length > 0 && !data.some((c) => c.id === activeCompanyId)) {
-          setActiveCompanyId(data[0].id);
-        }
+        setActiveCompanyId((current) => {
+          if (data.length > 0 && (!current || !data.some((c) => c.id === current))) {
+            return data[0].id;
+          }
+          return current;
+        });
       },
       (err) => {
         console.error('Companies sync error:', err);
@@ -56,7 +59,7 @@ export default function App() {
       }
     );
     return () => unsubscribe();
-  }, [activeCompanyId]);
+  }, []);
 
   // 2. Subscribe RO Systems stream for activeCompanyId
   useEffect(() => {
@@ -66,20 +69,22 @@ export default function App() {
       activeCompanyId,
       (data) => {
         setRoSystems(data);
-        if (data.length > 0) {
-          if (!data.some((r) => r.id === activeRoId)) {
-            setActiveRoId(data[0].id);
+        setActiveRoId((current) => {
+          if (data.length > 0) {
+            if (!data.some((r) => r.id === current)) {
+              return data[0].id;
+            }
+            return current;
           }
-        } else {
-          setActiveRoId('');
-        }
+          return '';
+        });
       },
       (err) => {
         console.error('RO Systems sync error:', err);
       }
     );
     return () => unsubscribe();
-  }, [activeCompanyId, activeRoId]);
+  }, [activeCompanyId]);
 
   // 3. Subscribe Membranes stream for activeCompanyId & activeRoId
   useEffect(() => {

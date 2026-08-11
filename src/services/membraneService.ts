@@ -16,6 +16,36 @@ const COMPANIES_COL = 'companies';
 const RO_SYSTEMS_COL = 'ro_systems';
 const MEMBRANES_COL = 'membranes';
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {},
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return new Error(JSON.stringify(errInfo));
+}
+
 export const DEFAULT_COMPANY: Company = {
   id: 'lion-corp',
   name: 'Lion Corporation (Thailand) Limited',
@@ -104,6 +134,92 @@ function sanitizeForFirestore<T>(data: T): T {
   return cleanObj as T;
 }
 
+const STORAGE_COMPANIES_KEY = 'ro_membrane_app_companies_v1';
+const STORAGE_RO_SYSTEMS_KEY = 'ro_membrane_app_ro_systems_v1';
+const STORAGE_MEMBRANES_KEY = 'ro_membrane_app_membranes_v1';
+
+export function getCachedCompanies(): Company[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_COMPANIES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn('Failed to read cached companies:', e);
+  }
+  return [DEFAULT_COMPANY];
+}
+
+export function setCachedCompanies(companies: Company[]): void {
+  try {
+    localStorage.setItem(STORAGE_COMPANIES_KEY, JSON.stringify(companies));
+  } catch (e) {
+    console.warn('Failed to write cached companies:', e);
+  }
+}
+
+export function getCachedROSystems(companyId?: string): ROSystem[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_RO_SYSTEMS_KEY);
+    if (raw) {
+      const all: ROSystem[] = JSON.parse(raw);
+      if (Array.isArray(all) && all.length > 0) {
+        if (companyId) return all.filter((r) => r.companyId === companyId);
+        return all;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to read cached ro systems:', e);
+  }
+  if (companyId) return DEFAULT_RO_SYSTEMS.filter((r) => r.companyId === companyId);
+  return DEFAULT_RO_SYSTEMS;
+}
+
+export function setCachedROSystems(roSystems: ROSystem[]): void {
+  try {
+    localStorage.setItem(STORAGE_RO_SYSTEMS_KEY, JSON.stringify(roSystems));
+  } catch (e) {
+    console.warn('Failed to write cached ro systems:', e);
+  }
+}
+
+export function getCachedMembranes(companyId?: string, roId?: string): MembraneData[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_MEMBRANES_KEY);
+    if (raw) {
+      const all: MembraneData[] = JSON.parse(raw);
+      if (Array.isArray(all) && all.length > 0) {
+        if (companyId && roId) {
+          return all.filter((m) => m.companyId === companyId && m.roId === roId);
+        }
+        return all;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to read cached membranes:', e);
+  }
+  const defaultList = initialMembranes.map((m) => ({
+    ...m,
+    id: m.id || `lion-corp_lion-ro-4_${m.membraneNo}`,
+    companyId: m.companyId || 'lion-corp',
+    roId: m.roId || 'lion-ro-4',
+    headerConfig: m.headerConfig || { ...defaultHeaderConfig }
+  }));
+  if (companyId && roId) {
+    return defaultList.filter((m) => m.companyId === companyId && m.roId === roId);
+  }
+  return defaultList;
+}
+
+export function setCachedMembranes(membranes: MembraneData[]): void {
+  try {
+    localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(membranes));
+  } catch (e) {
+    console.warn('Failed to write cached membranes:', e);
+  }
+}
+
 /**
  * Subscribes to Companies real-time stream. Auto-seeds default company if empty.
  */
@@ -132,11 +248,17 @@ export function subscribeCompanies(
       });
 
       list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
+      setCachedCompanies(list);
       onData(list);
     },
     (error) => {
-      console.error('Companies subscription error:', error);
-      if (onError) onError(error);
+      const formattedErr = handleFirestoreError(error, OperationType.GET, COMPANIES_COL);
+      console.warn('Firestore Companies error (using local cache fallback):', formattedErr.message);
+
+      const cached = getCachedCompanies();
+      onData(cached);
+
+      if (onError) onError(formattedErr);
     }
   );
 }
@@ -163,11 +285,21 @@ export function subscribeROSystems(
       });
 
       list.sort((a, b) => a.name.localeCompare(b.name, 'th', { numeric: true }));
+
+      const currentAll = getCachedROSystems();
+      const updatedAll = [...currentAll.filter((r) => r.companyId !== companyId), ...list];
+      setCachedROSystems(updatedAll);
+
       onData(list);
     },
     (error) => {
-      console.error('RO Systems subscription error:', error);
-      if (onError) onError(error);
+      const formattedErr = handleFirestoreError(error, OperationType.GET, RO_SYSTEMS_COL);
+      console.warn('Firestore RO Systems error (using local cache fallback):', formattedErr.message);
+
+      const cached = getCachedROSystems(companyId);
+      onData(cached);
+
+      if (onError) onError(formattedErr);
     }
   );
 }
@@ -191,10 +323,8 @@ export function subscribeMembranes(
         const data = docSnap.data() as MembraneData;
         const docId = docSnap.id;
 
-        // Match if explicit companyId & roId match
         const isMatch =
           (data.companyId === companyId && data.roId === roId) ||
-          // Backward compatibility for legacy docs without companyId/roId mapping to lion-corp / lion-ro-4
           (!data.companyId && !data.roId && companyId === 'lion-corp' && roId === 'lion-ro-4');
 
         if (isMatch) {
@@ -208,13 +338,25 @@ export function subscribeMembranes(
         }
       });
 
-      // Sort by membraneNo ascending
       list.sort((a, b) => Number(a.membraneNo) - Number(b.membraneNo));
+
+      const currentAll = getCachedMembranes();
+      const updatedAll = [
+        ...currentAll.filter((m) => !(m.companyId === companyId && m.roId === roId)),
+        ...list
+      ];
+      setCachedMembranes(updatedAll);
+
       onData(list);
     },
     (error) => {
-      console.error('Membranes subscription error:', error);
-      if (onError) onError(error);
+      const formattedErr = handleFirestoreError(error, OperationType.GET, MEMBRANES_COL);
+      console.warn('Firestore Membranes error (using local cache fallback):', formattedErr.message);
+
+      const cached = getCachedMembranes(companyId, roId);
+      onData(cached);
+
+      if (onError) onError(formattedErr);
     }
   );
 }
@@ -223,75 +365,119 @@ export function subscribeMembranes(
  * Save / Update a Company
  */
 export async function saveCompanyToCloud(company: Company): Promise<void> {
-  const docRef = doc(db, COMPANIES_COL, company.id);
   const dataToSave = sanitizeForFirestore({
     ...company,
     createdAt: company.createdAt || new Date().toISOString()
   });
-  await setDoc(docRef, dataToSave, { merge: true });
+
+  const cached = getCachedCompanies();
+  const existingIdx = cached.findIndex((c) => c.id === company.id);
+  if (existingIdx >= 0) {
+    cached[existingIdx] = dataToSave;
+  } else {
+    cached.push(dataToSave);
+  }
+  setCachedCompanies(cached);
+
+  try {
+    const docRef = doc(db, COMPANIES_COL, company.id);
+    await setDoc(docRef, dataToSave, { merge: true });
+  } catch (err) {
+    console.warn('Cloud save company failed (saved locally):', err);
+  }
 }
 
 /**
  * Delete a Company along with its RO Systems and Membrane reports.
  */
 export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
-  const batch = writeBatch(db);
+  const cachedComps = getCachedCompanies().filter((c) => c.id !== companyId);
+  setCachedCompanies(cachedComps);
 
-  // Delete company document
-  batch.delete(doc(db, COMPANIES_COL, companyId));
+  const cachedROs = getCachedROSystems().filter((r) => r.companyId !== companyId);
+  setCachedROSystems(cachedROs);
 
-  // Find & delete related RO Systems
-  const roSnapshot = await getDocs(collection(db, RO_SYSTEMS_COL));
-  roSnapshot.forEach((docSnap) => {
-    const data = docSnap.data() as ROSystem;
-    if (data.companyId === companyId) {
-      batch.delete(docSnap.ref);
-    }
-  });
+  const cachedMems = getCachedMembranes().filter((m) => m.companyId !== companyId);
+  setCachedMembranes(cachedMems);
 
-  // Find & delete related Membranes
-  const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
-  memSnapshot.forEach((docSnap) => {
-    const data = docSnap.data() as MembraneData;
-    if (data.companyId === companyId) {
-      batch.delete(docSnap.ref);
-    }
-  });
+  try {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, COMPANIES_COL, companyId));
 
-  await batch.commit();
+    const roSnapshot = await getDocs(collection(db, RO_SYSTEMS_COL));
+    roSnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as ROSystem;
+      if (data.companyId === companyId) {
+        batch.delete(docSnap.ref);
+      }
+    });
+
+    const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
+    memSnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as MembraneData;
+      if (data.companyId === companyId) {
+        batch.delete(docSnap.ref);
+      }
+    });
+
+    await batch.commit();
+  } catch (err) {
+    console.warn('Cloud delete company failed (deleted locally):', err);
+  }
 }
 
 /**
  * Save / Update an RO System
  */
 export async function saveROSystemToCloud(roSystem: ROSystem): Promise<void> {
-  const docRef = doc(db, RO_SYSTEMS_COL, roSystem.id);
   const dataToSave = sanitizeForFirestore({
     ...roSystem,
     createdAt: roSystem.createdAt || new Date().toISOString()
   });
-  await setDoc(docRef, dataToSave, { merge: true });
+
+  const cached = getCachedROSystems();
+  const existingIdx = cached.findIndex((r) => r.id === roSystem.id);
+  if (existingIdx >= 0) {
+    cached[existingIdx] = dataToSave;
+  } else {
+    cached.push(dataToSave);
+  }
+  setCachedROSystems(cached);
+
+  try {
+    const docRef = doc(db, RO_SYSTEMS_COL, roSystem.id);
+    await setDoc(docRef, dataToSave, { merge: true });
+  } catch (err) {
+    console.warn('Cloud save RO system failed (saved locally):', err);
+  }
 }
 
 /**
  * Delete an RO System along with its Membrane reports.
  */
 export async function deleteROSystemFromCloud(roId: string): Promise<void> {
-  const batch = writeBatch(db);
+  const cachedROs = getCachedROSystems().filter((r) => r.id !== roId);
+  setCachedROSystems(cachedROs);
 
-  // Delete RO System document
-  batch.delete(doc(db, RO_SYSTEMS_COL, roId));
+  const cachedMems = getCachedMembranes().filter((m) => m.roId !== roId);
+  setCachedMembranes(cachedMems);
 
-  // Find & delete related Membranes
-  const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
-  memSnapshot.forEach((docSnap) => {
-    const data = docSnap.data() as MembraneData;
-    if (data.roId === roId) {
-      batch.delete(docSnap.ref);
-    }
-  });
+  try {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, RO_SYSTEMS_COL, roId));
 
-  await batch.commit();
+    const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
+    memSnapshot.forEach((docSnap) => {
+      const data = docSnap.data() as MembraneData;
+      if (data.roId === roId) {
+        batch.delete(docSnap.ref);
+      }
+    });
+
+    await batch.commit();
+  } catch (err) {
+    console.warn('Cloud delete RO system failed (deleted locally):', err);
+  }
 }
 
 /**
@@ -302,7 +488,6 @@ export async function saveMembraneToCloud(membrane: MembraneData): Promise<void>
   const roId = membrane.roId || 'lion-ro-4';
   const docId = membrane.id || `${companyId}_${roId}_${membrane.membraneNo}`;
 
-  const docRef = doc(db, MEMBRANES_COL, docId);
   const rawData = {
     ...membrane,
     id: docId,
@@ -311,7 +496,24 @@ export async function saveMembraneToCloud(membrane: MembraneData): Promise<void>
     updatedAt: new Date().toISOString()
   };
   const dataToSave = sanitizeForFirestore(rawData);
-  await setDoc(docRef, dataToSave, { merge: true });
+
+  const cached = getCachedMembranes();
+  const existingIdx = cached.findIndex(
+    (m) => m.id === docId || (m.companyId === companyId && m.roId === roId && m.membraneNo === membrane.membraneNo)
+  );
+  if (existingIdx >= 0) {
+    cached[existingIdx] = dataToSave;
+  } else {
+    cached.push(dataToSave);
+  }
+  setCachedMembranes(cached);
+
+  try {
+    const docRef = doc(db, MEMBRANES_COL, docId);
+    await setDoc(docRef, dataToSave, { merge: true });
+  } catch (err) {
+    console.warn('Cloud save membrane failed (saved locally):', err);
+  }
 }
 
 /**
@@ -329,8 +531,15 @@ export async function deleteMembraneFromCloud(
   }
 
   if (targetId) {
-    const docRef = doc(db, MEMBRANES_COL, targetId);
-    await deleteDoc(docRef);
+    const cachedMems = getCachedMembranes().filter((m) => m.id !== targetId);
+    setCachedMembranes(cachedMems);
+
+    try {
+      const docRef = doc(db, MEMBRANES_COL, targetId);
+      await deleteDoc(docRef);
+    } catch (err) {
+      console.warn('Cloud delete membrane failed (deleted locally):', err);
+    }
   }
 }
 
@@ -338,35 +547,49 @@ export async function deleteMembraneFromCloud(
  * Seeds default hierarchy: Lion Corp + RO1..RO5 + initialMembranes in RO4 Pass 1
  */
 export async function seedDefaultHierarchy(): Promise<void> {
-  const batch = writeBatch(db);
-
-  // 1. Seed Company
-  const compRef = doc(db, COMPANIES_COL, DEFAULT_COMPANY.id);
-  batch.set(compRef, sanitizeForFirestore(DEFAULT_COMPANY));
-
-  // 2. Seed RO Systems (RO1 - RO5)
-  DEFAULT_RO_SYSTEMS.forEach((ro) => {
-    const roRef = doc(db, RO_SYSTEMS_COL, ro.id);
-    batch.set(roRef, sanitizeForFirestore(ro));
-  });
-
-  // 3. Seed initial membranes into Lion Corp -> RO4 Pass 1
-  initialMembranes.forEach((m) => {
-    const companyId = 'lion-corp';
-    const roId = 'lion-ro-4';
-    const docId = `${companyId}_${roId}_${m.membraneNo}`;
-    const memRef = doc(db, MEMBRANES_COL, docId);
-
-    const rawData = {
+  setCachedCompanies([DEFAULT_COMPANY]);
+  setCachedROSystems(DEFAULT_RO_SYSTEMS);
+  setCachedMembranes(
+    initialMembranes.map((m) => ({
       ...m,
-      id: docId,
-      companyId,
-      roId,
+      id: `${m.companyId || 'lion-corp'}_${m.roId || 'lion-ro-4'}_${m.membraneNo}`,
+      companyId: 'lion-corp',
+      roId: 'lion-ro-4',
       headerConfig: m.headerConfig || { ...defaultHeaderConfig },
       updatedAt: new Date().toISOString()
-    };
-    batch.set(memRef, sanitizeForFirestore(rawData));
-  });
+    }))
+  );
 
-  await batch.commit();
+  try {
+    const batch = writeBatch(db);
+
+    const compRef = doc(db, COMPANIES_COL, DEFAULT_COMPANY.id);
+    batch.set(compRef, sanitizeForFirestore(DEFAULT_COMPANY));
+
+    DEFAULT_RO_SYSTEMS.forEach((ro) => {
+      const roRef = doc(db, RO_SYSTEMS_COL, ro.id);
+      batch.set(roRef, sanitizeForFirestore(ro));
+    });
+
+    initialMembranes.forEach((m) => {
+      const companyId = 'lion-corp';
+      const roId = 'lion-ro-4';
+      const docId = `${companyId}_${roId}_${m.membraneNo}`;
+      const memRef = doc(db, MEMBRANES_COL, docId);
+
+      const rawData = {
+        ...m,
+        id: docId,
+        companyId,
+        roId,
+        headerConfig: m.headerConfig || { ...defaultHeaderConfig },
+        updatedAt: new Date().toISOString()
+      };
+      batch.set(memRef, sanitizeForFirestore(rawData));
+    });
+
+    await batch.commit();
+  } catch (err) {
+    console.warn('Seeding default hierarchy to cloud failed (using local cache):', err);
+  }
 }

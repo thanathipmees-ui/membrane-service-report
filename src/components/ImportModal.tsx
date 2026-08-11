@@ -687,34 +687,117 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       />
                     </div>
 
-                    {/* Extracted Photos Box */}
-                    {currentInspectorMembrane.images?.before?.[0] && (
-                      <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 space-y-2">
-                        <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                          <ImageIcon className="w-4 h-4 text-blue-600" /> รูปภาพที่สกัดจาก PDF สำหรับท่อนนี้ (Before / After):
+                    {/* Photos Section (Before & After) */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <ImageIcon className="w-4 h-4 text-blue-600" /> รูปภาพการล้างสำหรับท่อนนี้ (#{currentInspectorMembrane.membraneNo}):
                         </span>
-                        <div className="flex items-center gap-4">
-                          <div className="space-y-1">
-                            <span className="text-[10px] font-bold text-amber-700 uppercase"> Before (ก่อนล้าง)</span>
-                            <img
-                              src={currentInspectorMembrane.images.before[0]}
-                              alt="Before"
-                              className="h-24 rounded-xl border border-slate-300 object-cover shadow-sm"
-                            />
+                        <span className="text-[11px] text-slate-500">
+                          สกัดจาก PDF อัตโนมัติ หรืออัปโหลด/เปลี่ยนรูปภาพใหม่ได้ที่นี่
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* BEFORE PHOTO CARD */}
+                        <div className="bg-amber-50/50 p-3 rounded-xl border border-amber-200/80 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                              📸 ก่อนล้าง (Before)
+                            </span>
+                            <label className="text-[11px] font-bold text-blue-700 hover:text-blue-900 cursor-pointer underline">
+                              {currentInspectorMembrane.images?.before?.[0] ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  if (e.target.files?.[0]) {
+                                    const file = e.target.files[0];
+                                    const reader = new FileReader();
+                                    reader.readAsDataURL(file);
+                                    reader.onload = () => {
+                                      const res = reader.result as string;
+                                      setEditableMembranes((prev) =>
+                                        prev.map((m, idx) =>
+                                          idx === inspectorIndex
+                                            ? { ...m, images: { ...m.images, before: [res] } }
+                                            : m
+                                        )
+                                      );
+                                    };
+                                  }
+                                }}
+                              />
+                            </label>
                           </div>
-                          {currentInspectorMembrane.images?.after?.[0] && (
-                            <div className="space-y-1">
-                              <span className="text-[10px] font-bold text-emerald-700 uppercase"> After (หลังล้าง)</span>
+
+                          {currentInspectorMembrane.images?.before?.[0] ? (
+                            <div className="relative group rounded-xl overflow-hidden border border-amber-300 bg-white">
+                              <img
+                                src={currentInspectorMembrane.images.before[0]}
+                                alt="Before"
+                                className="w-full h-32 object-contain bg-slate-900/5"
+                              />
+                            </div>
+                          ) : (
+                            <div className="h-32 border-2 border-dashed border-amber-300 rounded-xl flex flex-col items-center justify-center text-amber-700 bg-white/60 text-xs">
+                              <ImageIcon className="w-6 h-6 opacity-40 mb-1" />
+                              <span>ยังไม่มีรูปภาพก่อนล้าง</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* AFTER PHOTO CARD */}
+                        <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-200/80 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-emerald-900 flex items-center gap-1">
+                              📸 หลังล้าง (After)
+                            </span>
+                            <label className="text-[11px] font-bold text-blue-700 hover:text-blue-900 cursor-pointer underline">
+                              {currentInspectorMembrane.images?.after?.[0] ? 'เปลี่ยนรูป' : '+ อัปโหลดรูป'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => {
+                                  if (e.target.files?.[0]) {
+                                    const file = e.target.files[0];
+                                    const reader = new FileReader();
+                                    reader.readAsDataURL(file);
+                                    reader.onload = () => {
+                                      const res = reader.result as string;
+                                      setEditableMembranes((prev) =>
+                                        prev.map((m, idx) =>
+                                          idx === inspectorIndex
+                                            ? { ...m, images: { ...m.images, after: [res] } }
+                                            : m
+                                        )
+                                      );
+                                    };
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+
+                          {currentInspectorMembrane.images?.after?.[0] ? (
+                            <div className="relative group rounded-xl overflow-hidden border border-emerald-300 bg-white">
                               <img
                                 src={currentInspectorMembrane.images.after[0]}
                                 alt="After"
-                                className="h-24 rounded-xl border border-slate-300 object-cover shadow-sm"
+                                className="w-full h-32 object-contain bg-slate-900/5"
                               />
+                            </div>
+                          ) : (
+                            <div className="h-32 border-2 border-dashed border-emerald-300 rounded-xl flex flex-col items-center justify-center text-emerald-700 bg-white/60 text-xs">
+                              <ImageIcon className="w-6 h-6 opacity-40 mb-1" />
+                              <span>ยังไม่มีรูปภาพหลังล้าง</span>
                             </div>
                           )}
                         </div>
                       </div>
-                    )}
+                    </div>
 
                     {/* Test Cycles Table (e.g., 3 dates) */}
                     <div className="space-y-2">
