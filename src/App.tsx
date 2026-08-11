@@ -54,7 +54,7 @@ export default function App() {
         });
       },
       (err) => {
-        console.error('Companies sync error:', err);
+        console.warn('Companies sync status:', err.message);
         setIsCloudConnected(false);
       }
     );
@@ -80,7 +80,7 @@ export default function App() {
         });
       },
       (err) => {
-        console.error('RO Systems sync error:', err);
+        console.warn('RO Systems sync status:', err.message);
       }
     );
     return () => unsubscribe();
@@ -106,7 +106,7 @@ export default function App() {
         setIsCloudConnected(true);
       },
       (err) => {
-        console.error('Membranes sync error:', err);
+        console.warn('Membranes sync status:', err.message);
         setIsLoading(false);
       }
     );

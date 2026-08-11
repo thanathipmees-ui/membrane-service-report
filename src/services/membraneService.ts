@@ -36,14 +36,14 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {},
-    operationType,
-    path,
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  return new Error(JSON.stringify(errInfo));
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('RESOURCE_EXHAUSTED');
+  if (isQuota) {
+    console.warn(`Firestore quota limit reached for ${operationType} on ${path}. Switched to local storage cache.`);
+  } else {
+    console.warn(`Firestore operation [${operationType}] on ${path} warning:`, errMsg);
+  }
+  return new Error(isQuota ? 'Firestore quota exceeded (using offline mode)' : errMsg);
 }
 
 export const DEFAULT_COMPANY: Company = {
