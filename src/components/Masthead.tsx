@@ -1,12 +1,15 @@
 import React from 'react';
 import { MembraneData, HeaderConfig } from '../types';
-import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText, Upload } from 'lucide-react';
+import { Plus, Download, Layers, CheckCircle2, AlertTriangle, FileText, Upload, RefreshCw, CloudCheck, HardDrive } from 'lucide-react';
 
 interface MastheadProps {
   membranes: MembraneData[];
   headerConfig?: HeaderConfig;
   companyName?: string;
   roName?: string;
+  isCloudConnected?: boolean;
+  isSyncing?: boolean;
+  onSyncCloud?: () => void;
   onNewReport: () => void;
   onImportClick: () => void;
   onExportHtml: () => void;
@@ -17,6 +20,9 @@ export const Masthead: React.FC<MastheadProps> = ({
   headerConfig,
   companyName,
   roName,
+  isCloudConnected = true,
+  isSyncing = false,
+  onSyncCloud,
   onNewReport,
   onImportClick,
   onExportHtml,
@@ -37,9 +43,40 @@ export const Masthead: React.FC<MastheadProps> = ({
       <div className="max-w-7xl mx-auto relative z-10">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div>
-            <div className="inline-flex items-center gap-2 text-cyan-300 font-extrabold text-xs tracking-wider uppercase bg-white/10 px-3 py-1 rounded-full backdrop-blur-sm border border-cyan-400/20 mb-3">
-              <FileText className="w-3.5 h-3.5 text-cyan-300" />
-              {subtitle}
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <div className="inline-flex items-center gap-2 text-cyan-300 font-extrabold text-xs tracking-wider uppercase bg-white/10 px-3 py-1 rounded-full backdrop-blur-sm border border-cyan-400/20">
+                <FileText className="w-3.5 h-3.5 text-cyan-300" />
+                {subtitle}
+              </div>
+
+              {/* Cache / Cloud Storage Status Badge with Sync Button */}
+              {onSyncCloud && (
+                <button
+                  onClick={onSyncCloud}
+                  disabled={isSyncing}
+                  title="คลิกเพื่อซิงค์ข้อมูลกับคลาวด์ หรือตรวจสอบการอัปเดต"
+                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm border transition-all cursor-pointer ${
+                    isCloudConnected
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30 hover:bg-emerald-500/30'
+                      : 'bg-amber-500/20 text-amber-300 border-amber-400/30 hover:bg-amber-500/30'
+                  }`}
+                >
+                  {isSyncing ? (
+                    <RefreshCw className="w-3 h-3 animate-spin text-cyan-200" />
+                  ) : isCloudConnected ? (
+                    <CloudCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  ) : (
+                    <HardDrive className="w-3.5 h-3.5 text-amber-300" />
+                  )}
+                  <span>
+                    {isSyncing
+                      ? 'กำลังซิงค์คลาวด์...'
+                      : isCloudConnected
+                      ? 'เชื่อมต่อ Cloud Database สำเร็จ'
+                      : 'โหมดบันทึกในเครื่อง (Local Mode)'}
+                  </span>
+                </button>
+              )}
             </div>
             <h1 className="text-2xl sm:text-3xl md:text-4xl font-extrabold tracking-tight text-white leading-tight">
               {title}
@@ -96,3 +133,4 @@ export const Masthead: React.FC<MastheadProps> = ({
     </header>
   );
 };
+

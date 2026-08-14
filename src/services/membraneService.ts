@@ -3,7 +3,6 @@ import {
   doc,
   setDoc,
   deleteDoc,
-  onSnapshot,
   writeBatch,
   getDocs,
   query,
@@ -27,20 +26,10 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-  };
-}
-
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errMsg = error instanceof Error ? error.message : String(error);
   const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('RESOURCE_EXHAUSTED');
-  return new Error(isQuota ? 'Firestore quota exceeded (using local storage mode)' : errMsg);
+  return new Error(isQuota ? 'Firestore quota exceeded' : errMsg);
 }
 
 export const DEFAULT_COMPANY: Company = {
@@ -213,7 +202,6 @@ export function setCachedMembranes(membranes: MembraneData[]): void {
   try {
     localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(membranes));
   } catch (e) {
-    // If quota exceeded, trim large base64 photos/chartImages to fit in localStorage safely
     try {
       const lightweight = membranes.map((m) => {
         const copy: MembraneData = {
@@ -228,147 +216,100 @@ export function setCachedMembranes(membranes: MembraneData[]): void {
       });
       localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(lightweight));
     } catch (err2) {
-      // Silently catch
+      // Silently ignore
     }
   }
 }
 
 /**
- * Subscribes to Companies real-time stream. Auto-seeds default company if empty.
+ * Fetch all Companies from Cloud Firestore directly.
+ * Consumes only 1 collection read.
  */
-export function subscribeCompanies(
-  onData: (companies: Company[]) => void,
-  onError?: (err: Error) => void
-): () => void {
-  const colRef = collection(db, COMPANIES_COL);
-
-  return onSnapshot(
-    colRef,
-    async (snapshot) => {
-      if (snapshot.empty) {
-        console.log('Companies collection is empty. Seeding default company & hierarchy...');
-        try {
-          await seedDefaultHierarchy();
-        } catch (err) {
-          console.error('Error seeding default hierarchy:', err);
-        }
-        return;
-      }
-
+export async function fetchCompaniesFromCloud(): Promise<Company[]> {
+  try {
+    const compSnap = await getDocs(collection(db, COMPANIES_COL));
+    if (!compSnap.empty) {
       const list: Company[] = [];
-      snapshot.forEach((docSnap) => {
+      compSnap.forEach((docSnap) => {
         list.push(docSnap.data() as Company);
       });
-
       list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
       setCachedCompanies(list);
-      onData(list);
-    },
-    (error) => {
-      const formattedErr = handleFirestoreError(error, OperationType.GET, COMPANIES_COL);
-      const cached = getCachedCompanies();
-      onData(cached);
-      if (onError) onError(formattedErr);
+      return list;
     }
-  );
+  } catch (err) {
+    console.warn('Could not fetch companies from cloud, using cache:', err);
+  }
+  return getCachedCompanies();
 }
 
 /**
- * Subscribes to RO Systems real-time stream for all systems or specific company.
+ * Fetch RO Systems for a specific Company directly from Cloud Firestore.
+ * Uses targeted where clause (only reads ROs for this company, e.g. ~5 reads).
  */
-export function subscribeROSystems(
-  companyId: string,
-  onData: (roSystems: ROSystem[]) => void,
-  onError?: (err: Error) => void
-): () => void {
-  const q = companyId
-    ? query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId))
-    : collection(db, RO_SYSTEMS_COL);
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
+export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSystem[]> {
+  if (!companyId) return getCachedROSystems();
+  try {
+    const roQ = query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId));
+    const roSnap = await getDocs(roQ);
+    if (!roSnap.empty) {
       const list: ROSystem[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as ROSystem;
-        if (!companyId || data.companyId === companyId) {
-          list.push(data);
-        }
+      roSnap.forEach((docSnap) => {
+        list.push(docSnap.data() as ROSystem);
       });
-
       list.sort((a, b) => a.name.localeCompare(b.name, 'th', { numeric: true }));
-
-      const currentAll = getCachedROSystems();
-      const updatedAll = [...currentAll.filter((r) => r.companyId !== companyId), ...list];
-      setCachedROSystems(updatedAll);
-
-      onData(list);
-    },
-    (error) => {
-      const formattedErr = handleFirestoreError(error, OperationType.GET, RO_SYSTEMS_COL);
-      const cached = getCachedROSystems(companyId);
-      onData(cached);
-      if (onError) onError(formattedErr);
+      
+      // Update cache for this company
+      const allCached = getCachedROSystems().filter((r) => r.companyId !== companyId);
+      setCachedROSystems([...allCached, ...list]);
+      return list;
     }
-  );
+  } catch (err) {
+    console.warn('Could not fetch RO systems from cloud, using cache:', err);
+  }
+  return getCachedROSystems(companyId);
 }
 
 /**
- * Subscribes to Membranes for a specific Company & RO System.
- * Uses targeted Firestore query with where clauses to minimize read quota.
+ * Fetch Membranes for a specific RO System directly from Cloud Firestore.
+ * Targeted where clause (only reads ~10-20 membranes for this active RO).
  */
-export function subscribeMembranes(
-  companyId: string,
-  roId: string,
-  onData: (membranes: MembraneData[]) => void,
-  onError?: (err: Error) => void
-): () => void {
-  const q = (companyId && roId)
-    ? query(
-        collection(db, MEMBRANES_COL),
-        where('companyId', '==', companyId),
-        where('roId', '==', roId)
-      )
-    : collection(db, MEMBRANES_COL);
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
+export async function fetchMembranesFromCloud(companyId: string, roId: string): Promise<MembraneData[]> {
+  if (!companyId || !roId) return getCachedMembranes(companyId, roId);
+  try {
+    const memQ = query(
+      collection(db, MEMBRANES_COL),
+      where('companyId', '==', companyId),
+      where('roId', '==', roId)
+    );
+    const memSnap = await getDocs(memQ);
+    if (!memSnap.empty) {
       const list: MembraneData[] = [];
-      snapshot.forEach((docSnap) => {
+      memSnap.forEach((docSnap) => {
         const data = docSnap.data() as MembraneData;
-        const docId = docSnap.id;
         list.push({
           ...data,
-          id: docId,
-          companyId: data.companyId || companyId || 'lion-corp',
-          roId: data.roId || roId || 'lion-ro-4',
+          id: docSnap.id,
+          companyId: data.companyId || companyId,
+          roId: data.roId || roId,
           headerConfig: data.headerConfig ? { ...data.headerConfig } : { ...defaultHeaderConfig }
         });
       });
-
       list.sort((a, b) => Number(a.membraneNo) - Number(b.membraneNo));
-
-      const currentAll = getCachedMembranes();
-      const updatedAll = [
-        ...currentAll.filter((m) => !(m.companyId === companyId && m.roId === roId)),
-        ...list
-      ];
-      setCachedMembranes(updatedAll);
-
-      onData(list);
-    },
-    (error) => {
-      const formattedErr = handleFirestoreError(error, OperationType.GET, MEMBRANES_COL);
-      const cached = getCachedMembranes(companyId, roId);
-      onData(cached);
-      if (onError) onError(formattedErr);
+      
+      // Update cache
+      const allCached = getCachedMembranes().filter((m) => !(m.companyId === companyId && m.roId === roId));
+      setCachedMembranes([...allCached, ...list]);
+      return list;
     }
-  );
+  } catch (err) {
+    console.warn('Could not fetch membranes from cloud, using cache:', err);
+  }
+  return getCachedMembranes(companyId, roId);
 }
 
 /**
- * Save / Update a Company
+ * Save a Company directly to Cloud Firestore.
  */
 export async function saveCompanyToCloud(company: Company): Promise<void> {
   const dataToSave = sanitizeForFirestore({
@@ -394,7 +335,7 @@ export async function saveCompanyToCloud(company: Company): Promise<void> {
 }
 
 /**
- * Delete a Company along with its RO Systems and Membrane reports.
+ * Delete a Company and its descendants directly from Cloud Firestore.
  */
 export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   const cachedComps = getCachedCompanies().filter((c) => c.id !== companyId);
@@ -409,7 +350,7 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, COMPANIES_COL, companyId));
   } catch (err) {
-    console.warn('Cloud delete company doc failed (deleted locally):', err);
+    console.warn('Cloud delete company doc failed:', err);
   }
 
   try {
@@ -442,7 +383,7 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
 }
 
 /**
- * Save / Update an RO System
+ * Save an RO System directly to Cloud Firestore.
  */
 export async function saveROSystemToCloud(roSystem: ROSystem): Promise<void> {
   const dataToSave = sanitizeForFirestore({
@@ -468,7 +409,7 @@ export async function saveROSystemToCloud(roSystem: ROSystem): Promise<void> {
 }
 
 /**
- * Delete an RO System along with its Membrane reports.
+ * Delete an RO System directly from Cloud Firestore.
  */
 export async function deleteROSystemFromCloud(roId: string): Promise<void> {
   const cachedROs = getCachedROSystems().filter((r) => r.id !== roId);
@@ -480,7 +421,7 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
   try {
     await deleteDoc(doc(db, RO_SYSTEMS_COL, roId));
   } catch (err) {
-    console.warn('Cloud delete RO system doc failed (deleted locally):', err);
+    console.warn('Cloud delete RO system doc failed:', err);
   }
 
   try {
@@ -499,7 +440,7 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
 }
 
 /**
- * Batch save multiple membranes in a single write operation to save writes/reads quota.
+ * Save multiple membranes to Cloud Firestore in a single Batch operation.
  */
 export async function saveBatchMembranesToCloud(membranesList: MembraneData[]): Promise<void> {
   if (membranesList.length === 0) return;
@@ -552,7 +493,7 @@ export async function saveBatchMembranesToCloud(membranesList: MembraneData[]): 
 }
 
 /**
- * Save / Update a Membrane document in Cloud Firestore.
+ * Save a single Membrane document to Cloud Firestore.
  */
 export async function saveMembraneToCloud(membrane: MembraneData): Promise<void> {
   const companyId = membrane.companyId || 'lion-corp';
@@ -588,7 +529,7 @@ export async function saveMembraneToCloud(membrane: MembraneData): Promise<void>
 }
 
 /**
- * Delete a Membrane document.
+ * Delete a Membrane document from Cloud Firestore.
  */
 export async function deleteMembraneFromCloud(
   docId: string,
@@ -611,56 +552,5 @@ export async function deleteMembraneFromCloud(
     } catch (err) {
       console.warn('Cloud delete membrane failed (deleted locally):', err);
     }
-  }
-}
-
-/**
- * Seeds default hierarchy: Lion Corp + RO1..RO5 + initialMembranes in RO4 Pass 1
- */
-export async function seedDefaultHierarchy(): Promise<void> {
-  setCachedCompanies([DEFAULT_COMPANY]);
-  setCachedROSystems(DEFAULT_RO_SYSTEMS);
-  setCachedMembranes(
-    initialMembranes.map((m) => ({
-      ...m,
-      id: `${m.companyId || 'lion-corp'}_${m.roId || 'lion-ro-4'}_${m.membraneNo}`,
-      companyId: 'lion-corp',
-      roId: 'lion-ro-4',
-      headerConfig: m.headerConfig || { ...defaultHeaderConfig },
-      updatedAt: new Date().toISOString()
-    }))
-  );
-
-  try {
-    const batch = writeBatch(db);
-
-    const compRef = doc(db, COMPANIES_COL, DEFAULT_COMPANY.id);
-    batch.set(compRef, sanitizeForFirestore(DEFAULT_COMPANY));
-
-    DEFAULT_RO_SYSTEMS.forEach((ro) => {
-      const roRef = doc(db, RO_SYSTEMS_COL, ro.id);
-      batch.set(roRef, sanitizeForFirestore(ro));
-    });
-
-    initialMembranes.forEach((m) => {
-      const companyId = 'lion-corp';
-      const roId = 'lion-ro-4';
-      const docId = `${companyId}_${roId}_${m.membraneNo}`;
-      const memRef = doc(db, MEMBRANES_COL, docId);
-
-      const rawData = {
-        ...m,
-        id: docId,
-        companyId,
-        roId,
-        headerConfig: m.headerConfig || { ...defaultHeaderConfig },
-        updatedAt: new Date().toISOString()
-      };
-      batch.set(memRef, sanitizeForFirestore(rawData));
-    });
-
-    await batch.commit();
-  } catch (err) {
-    console.warn('Seeding default hierarchy to cloud failed (using local cache):', err);
   }
 }

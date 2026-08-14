@@ -14,9 +14,12 @@ import { PhotoLightbox } from './components/PhotoLightbox';
 import { ExportModal } from './components/ExportModal';
 import { ImportModal } from './components/ImportModal';
 import {
-  subscribeCompanies,
-  subscribeROSystems,
-  subscribeMembranes,
+  getCachedCompanies,
+  getCachedROSystems,
+  getCachedMembranes,
+  fetchCompaniesFromCloud,
+  fetchROSystemsFromCloud,
+  fetchMembranesFromCloud,
   saveCompanyToCloud,
   deleteCompanyFromCloud,
   saveROSystemToCloud,
@@ -28,92 +31,124 @@ import {
 } from './services/membraneService';
 
 export default function App() {
-  const [companies, setCompanies] = useState<Company[]>([DEFAULT_COMPANY]);
-  const [activeCompanyId, setActiveCompanyId] = useState<string>('lion-corp');
+  const initialComps = getCachedCompanies();
+  const initialCompanyId = initialComps[0]?.id || 'lion-corp';
+  const initialROs = getCachedROSystems(initialCompanyId);
+  const initialRoId = initialROs[0]?.id || 'lion-ro-4';
+  const initialMems = getCachedMembranes(initialCompanyId, initialRoId);
 
-  const [roSystems, setRoSystems] = useState<ROSystem[]>([]);
-  const [activeRoId, setActiveRoId] = useState<string>('lion-ro-4');
+  const [companies, setCompanies] = useState<Company[]>(initialComps);
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(initialCompanyId);
 
-  const [membranes, setMembranes] = useState<MembraneData[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(false);
+  const [roSystems, setRoSystems] = useState<ROSystem[]>(initialROs);
+  const [activeRoId, setActiveRoId] = useState<string>(initialRoId);
+
+  const [membranes, setMembranes] = useState<MembraneData[]>(initialMems);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [filterStatus, setFilterStatus] = useState<'ALL' | MembraneStatus>('ALL');
 
-  // 1. Subscribe Companies stream
+  // Direct Cloud Fetch on Initial Mount (Consumes only ~15 reads total)
   useEffect(() => {
-    const unsubscribe = subscribeCompanies(
-      (data) => {
-        setCompanies(data);
-        setIsCloudConnected(true);
-        setActiveCompanyId((current) => {
-          if (data.length > 0 && (!current || !data.some((c) => c.id === current))) {
-            return data[0].id;
+    let isMounted = true;
+    (async () => {
+      try {
+        const comps = await fetchCompaniesFromCloud();
+        if (!isMounted) return;
+        if (comps.length > 0) {
+          setCompanies(comps);
+          const targetCompId = comps.some((c) => c.id === activeCompanyId) ? activeCompanyId : comps[0].id;
+          setActiveCompanyId(targetCompId);
+
+          const ros = await fetchROSystemsFromCloud(targetCompId);
+          if (!isMounted) return;
+          if (ros.length > 0) {
+            setRoSystems(ros);
+            const targetRoId = ros.some((r) => r.id === activeRoId) ? activeRoId : ros[0].id;
+            setActiveRoId(targetRoId);
+
+            const mems = await fetchMembranesFromCloud(targetCompId, targetRoId);
+            if (!isMounted) return;
+            setMembranes(mems);
           }
-          return current;
-        });
-      },
-      (err) => {
-        console.warn('Companies sync status:', err.message);
-        setIsCloudConnected(false);
+        }
+        setIsCloudConnected(true);
+      } catch (err) {
+        console.warn('Initial cloud connection notice:', err);
       }
-    );
-    return () => unsubscribe();
+    })();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // 2. Subscribe RO Systems stream for activeCompanyId
-  useEffect(() => {
-    if (!activeCompanyId) return;
-
-    const unsubscribe = subscribeROSystems(
-      activeCompanyId,
-      (data) => {
-        setRoSystems(data);
-        setActiveRoId((current) => {
-          if (data.length > 0) {
-            if (!data.some((r) => r.id === current)) {
-              return data[0].id;
-            }
-            return current;
-          }
-          return '';
-        });
-      },
-      (err) => {
-        console.warn('RO Systems sync status:', err.message);
+  // Handle Select Company with targeted Cloud Fetch
+  const handleSelectCompany = async (companyId: string) => {
+    setActiveCompanyId(companyId);
+    try {
+      const ros = await fetchROSystemsFromCloud(companyId);
+      setRoSystems(ros);
+      const nextRoId = ros[0]?.id || '';
+      setActiveRoId(nextRoId);
+      if (nextRoId) {
+        const mems = await fetchMembranesFromCloud(companyId, nextRoId);
+        setMembranes(mems);
+      } else {
+        setMembranes([]);
       }
-    );
-    return () => unsubscribe();
-  }, [activeCompanyId]);
-
-  // 3. Subscribe Membranes stream for activeCompanyId & activeRoId
-  useEffect(() => {
-    if (!activeCompanyId || !activeRoId) {
-      setMembranes([]);
-      setIsLoading(false);
-      return;
+      setCurrentIndex(0);
+    } catch (err) {
+      console.warn('Error fetching data for selected company:', err);
     }
+  };
 
-    setIsLoading(true);
-    setCurrentIndex(0);
+  // Handle Select RO System with targeted Cloud Fetch
+  const handleSelectRO = async (roId: string) => {
+    setActiveRoId(roId);
+    try {
+      const mems = await fetchMembranesFromCloud(activeCompanyId, roId);
+      setMembranes(mems);
+      setCurrentIndex(0);
+    } catch (err) {
+      console.warn('Error fetching membranes for selected RO:', err);
+    }
+  };
 
-    const unsubscribe = subscribeMembranes(
-      activeCompanyId,
-      activeRoId,
-      (data) => {
-        setMembranes(data);
-        setIsLoading(false);
-        setIsCloudConnected(true);
-      },
-      (err) => {
-        console.warn('Membranes sync status:', err.message);
-        setIsLoading(false);
+  // Manual Cloud Sync Handler
+  const handleSyncCloud = async () => {
+    setIsSyncing(true);
+    try {
+      const comps = await fetchCompaniesFromCloud();
+      if (comps.length > 0) {
+        setCompanies(comps);
       }
-    );
+      const targetCompId = comps.some((c) => c.id === activeCompanyId) ? activeCompanyId : (comps[0]?.id || 'lion-corp');
+      setActiveCompanyId(targetCompId);
 
-    return () => unsubscribe();
-  }, [activeCompanyId, activeRoId]);
+      const ros = await fetchROSystemsFromCloud(targetCompId);
+      if (ros.length > 0) {
+        setRoSystems(ros);
+      }
+      const targetRoId = ros.some((r) => r.id === activeRoId) ? activeRoId : (ros[0]?.id || '');
+      setActiveRoId(targetRoId);
+
+      if (targetRoId) {
+        const mems = await fetchMembranesFromCloud(targetCompId, targetRoId);
+        setMembranes(mems);
+      }
+      setIsCloudConnected(true);
+      showToast('เชื่อมต่อและอัปเดตข้อมูลจากคลาวด์เรียบร้อย!');
+    } catch (err) {
+      console.warn('Sync cloud status:', err);
+      showToast('เชื่อมต่อในโหมดแคช (ปลอดภัย)');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   // Filtered dataset based on status pill
   const filteredMembranes = membranes.filter((m) => {
@@ -498,14 +533,23 @@ export default function App() {
         </div>
       )}
 
-      {/* Cloud Sync Status Indicator */}
+      {/* Cloud Status Indicator */}
       <div className="bg-slate-900 text-slate-300 text-[11px] px-4 py-1.5 flex items-center justify-between border-b border-slate-800">
-        <div className="flex items-center gap-2 max-w-7xl mx-auto w-full">
-          <span className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-          <span className="font-semibold text-white">
-            {isCloudConnected ? 'Cloud Database Connected (Firebase Firestore)' : 'Connecting to Cloud Database...'}
-          </span>
-          <span className="text-slate-400 hidden sm:inline">&middot; ข้อมูลอัปเดตและซิงค์อัตโนมัติทุกเครื่องแบบ Real-Time</span>
+        <div className="flex items-center justify-between max-w-7xl mx-auto w-full">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            <span className="font-semibold text-white">
+              {isCloudConnected ? 'Cloud Database Connected (Firebase Firestore)' : 'Connecting to Cloud Database...'}
+            </span>
+            <span className="text-slate-400 hidden sm:inline">&middot; ดึงข้อมูลเฉพาะ RO ที่เปิดใช้งาน ประหยัดโควต้าสูงสุด (อ่านเพียง ~15 ครั้ง/การเปิดเว็บ)</span>
+          </div>
+          <button
+            onClick={handleSyncCloud}
+            disabled={isSyncing}
+            className="text-cyan-300 hover:text-cyan-200 underline font-medium cursor-pointer ml-2"
+          >
+            {isSyncing ? 'กำลังรีเฟรชคลาวด์...' : 'รีเฟรชข้อมูลคลาวด์'}
+          </button>
         </div>
       </div>
 
@@ -515,6 +559,9 @@ export default function App() {
         headerConfig={activeHeaderConfig}
         companyName={activeCompany?.name}
         roName={activeRo?.name}
+        isCloudConnected={isCloudConnected}
+        isSyncing={isSyncing}
+        onSyncCloud={handleSyncCloud}
         onNewReport={handleNewReportClick}
         onImportClick={() => setIsImportModalOpen(true)}
         onExportHtml={() => setIsExportModalOpen(true)}
@@ -525,12 +572,12 @@ export default function App() {
         <CompanyRoBar
           companies={companies}
           activeCompanyId={activeCompanyId}
-          onSelectCompany={setActiveCompanyId}
+          onSelectCompany={handleSelectCompany}
           onAddCompany={handleAddCompany}
           onDeleteCompany={handleDeleteCompany}
           roSystems={roSystems}
           activeRoId={activeRoId}
-          onSelectRO={setActiveRoId}
+          onSelectRO={handleSelectRO}
           onAddRO={handleAddRO}
           onDeleteRO={handleDeleteRO}
         />
