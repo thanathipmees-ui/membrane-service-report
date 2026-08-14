@@ -5,7 +5,9 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
-  getDocs
+  getDocs,
+  query,
+  where
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Company, ROSystem, MembraneData } from '../types';
@@ -38,12 +40,7 @@ export interface FirestoreErrorInfo {
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errMsg = error instanceof Error ? error.message : String(error);
   const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('RESOURCE_EXHAUSTED');
-  if (isQuota) {
-    console.warn(`Firestore quota limit reached for ${operationType} on ${path}. Switched to local storage cache.`);
-  } else {
-    console.warn(`Firestore operation [${operationType}] on ${path} warning:`, errMsg);
-  }
-  return new Error(isQuota ? 'Firestore quota exceeded (using offline mode)' : errMsg);
+  return new Error(isQuota ? 'Firestore quota exceeded (using local storage mode)' : errMsg);
 }
 
 export const DEFAULT_COMPANY: Company = {
@@ -216,7 +213,23 @@ export function setCachedMembranes(membranes: MembraneData[]): void {
   try {
     localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(membranes));
   } catch (e) {
-    console.warn('Failed to write cached membranes:', e);
+    // If quota exceeded, trim large base64 photos/chartImages to fit in localStorage safely
+    try {
+      const lightweight = membranes.map((m) => {
+        const copy: MembraneData = {
+          ...m,
+          chartImage: undefined,
+          images: {
+            before: m.images?.before ? m.images.before.slice(0, 1) : [],
+            after: m.images?.after ? m.images.after.slice(0, 1) : []
+          }
+        };
+        return copy;
+      });
+      localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(lightweight));
+    } catch (err2) {
+      // Silently catch
+    }
   }
 }
 
@@ -253,11 +266,8 @@ export function subscribeCompanies(
     },
     (error) => {
       const formattedErr = handleFirestoreError(error, OperationType.GET, COMPANIES_COL);
-      console.warn('Firestore Companies error (using local cache fallback):', formattedErr.message);
-
       const cached = getCachedCompanies();
       onData(cached);
-
       if (onError) onError(formattedErr);
     }
   );
@@ -271,15 +281,17 @@ export function subscribeROSystems(
   onData: (roSystems: ROSystem[]) => void,
   onError?: (err: Error) => void
 ): () => void {
-  const colRef = collection(db, RO_SYSTEMS_COL);
+  const q = companyId
+    ? query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId))
+    : collection(db, RO_SYSTEMS_COL);
 
   return onSnapshot(
-    colRef,
+    q,
     (snapshot) => {
       const list: ROSystem[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as ROSystem;
-        if (data.companyId === companyId) {
+        if (!companyId || data.companyId === companyId) {
           list.push(data);
         }
       });
@@ -294,11 +306,8 @@ export function subscribeROSystems(
     },
     (error) => {
       const formattedErr = handleFirestoreError(error, OperationType.GET, RO_SYSTEMS_COL);
-      console.warn('Firestore RO Systems error (using local cache fallback):', formattedErr.message);
-
       const cached = getCachedROSystems(companyId);
       onData(cached);
-
       if (onError) onError(formattedErr);
     }
   );
@@ -306,6 +315,7 @@ export function subscribeROSystems(
 
 /**
  * Subscribes to Membranes for a specific Company & RO System.
+ * Uses targeted Firestore query with where clauses to minimize read quota.
  */
 export function subscribeMembranes(
   companyId: string,
@@ -313,29 +323,28 @@ export function subscribeMembranes(
   onData: (membranes: MembraneData[]) => void,
   onError?: (err: Error) => void
 ): () => void {
-  const colRef = collection(db, MEMBRANES_COL);
+  const q = (companyId && roId)
+    ? query(
+        collection(db, MEMBRANES_COL),
+        where('companyId', '==', companyId),
+        where('roId', '==', roId)
+      )
+    : collection(db, MEMBRANES_COL);
 
   return onSnapshot(
-    colRef,
+    q,
     (snapshot) => {
       const list: MembraneData[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as MembraneData;
         const docId = docSnap.id;
-
-        const isMatch =
-          (data.companyId === companyId && data.roId === roId) ||
-          (!data.companyId && !data.roId && companyId === 'lion-corp' && roId === 'lion-ro-4');
-
-        if (isMatch) {
-          list.push({
-            ...data,
-            id: docId,
-            companyId: data.companyId || 'lion-corp',
-            roId: data.roId || 'lion-ro-4',
-            headerConfig: data.headerConfig ? { ...data.headerConfig } : { ...defaultHeaderConfig }
-          });
-        }
+        list.push({
+          ...data,
+          id: docId,
+          companyId: data.companyId || companyId || 'lion-corp',
+          roId: data.roId || roId || 'lion-ro-4',
+          headerConfig: data.headerConfig ? { ...data.headerConfig } : { ...defaultHeaderConfig }
+        });
       });
 
       list.sort((a, b) => Number(a.membraneNo) - Number(b.membraneNo));
@@ -351,11 +360,8 @@ export function subscribeMembranes(
     },
     (error) => {
       const formattedErr = handleFirestoreError(error, OperationType.GET, MEMBRANES_COL);
-      console.warn('Firestore Membranes error (using local cache fallback):', formattedErr.message);
-
       const cached = getCachedMembranes(companyId, roId);
       onData(cached);
-
       if (onError) onError(formattedErr);
     }
   );
@@ -407,17 +413,13 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   }
 
   try {
-    const roSnapshot = await getDocs(collection(db, RO_SYSTEMS_COL));
-    const batch = writeBatch(db);
-    let count = 0;
-    roSnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as ROSystem;
-      if (data.companyId === companyId) {
+    const roQ = query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId));
+    const roSnapshot = await getDocs(roQ);
+    if (!roSnapshot.empty) {
+      const batch = writeBatch(db);
+      roSnapshot.forEach((docSnap) => {
         batch.delete(docSnap.ref);
-        count++;
-      }
-    });
-    if (count > 0) {
+      });
       await batch.commit();
     }
   } catch (err) {
@@ -425,17 +427,13 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   }
 
   try {
-    const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
-    const batch = writeBatch(db);
-    let count = 0;
-    memSnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as MembraneData;
-      if (data.companyId === companyId) {
+    const memQ = query(collection(db, MEMBRANES_COL), where('companyId', '==', companyId));
+    const memSnapshot = await getDocs(memQ);
+    if (!memSnapshot.empty) {
+      const batch = writeBatch(db);
+      memSnapshot.forEach((docSnap) => {
         batch.delete(docSnap.ref);
-        count++;
-      }
-    });
-    if (count > 0) {
+      });
       await batch.commit();
     }
   } catch (err) {
@@ -486,21 +484,70 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
   }
 
   try {
-    const memSnapshot = await getDocs(collection(db, MEMBRANES_COL));
-    const batch = writeBatch(db);
-    let count = 0;
-    memSnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as MembraneData;
-      if (data.roId === roId) {
+    const memQ = query(collection(db, MEMBRANES_COL), where('roId', '==', roId));
+    const memSnapshot = await getDocs(memQ);
+    if (!memSnapshot.empty) {
+      const batch = writeBatch(db);
+      memSnapshot.forEach((docSnap) => {
         batch.delete(docSnap.ref);
-        count++;
-      }
-    });
-    if (count > 0) {
+      });
       await batch.commit();
     }
   } catch (err) {
     console.warn('Cloud delete RO membranes failed:', err);
+  }
+}
+
+/**
+ * Batch save multiple membranes in a single write operation to save writes/reads quota.
+ */
+export async function saveBatchMembranesToCloud(membranesList: MembraneData[]): Promise<void> {
+  if (membranesList.length === 0) return;
+
+  const cached = getCachedMembranes();
+  const updatedMembranes = [...cached];
+
+  membranesList.forEach((m) => {
+    const companyId = m.companyId || 'lion-corp';
+    const roId = m.roId || 'lion-ro-4';
+    const docId = m.id || `${companyId}_${roId}_${m.membraneNo}`;
+    const sanitized = sanitizeForFirestore({
+      ...m,
+      id: docId,
+      companyId,
+      roId,
+      updatedAt: new Date().toISOString()
+    });
+
+    const idx = updatedMembranes.findIndex((existing) => existing.id === docId);
+    if (idx >= 0) {
+      updatedMembranes[idx] = sanitized;
+    } else {
+      updatedMembranes.push(sanitized);
+    }
+  });
+
+  setCachedMembranes(updatedMembranes);
+
+  try {
+    const batch = writeBatch(db);
+    membranesList.forEach((m) => {
+      const companyId = m.companyId || 'lion-corp';
+      const roId = m.roId || 'lion-ro-4';
+      const docId = m.id || `${companyId}_${roId}_${m.membraneNo}`;
+      const docRef = doc(db, MEMBRANES_COL, docId);
+      const sanitized = sanitizeForFirestore({
+        ...m,
+        id: docId,
+        companyId,
+        roId,
+        updatedAt: new Date().toISOString()
+      });
+      batch.set(docRef, sanitized, { merge: true });
+    });
+    await batch.commit();
+  } catch (err) {
+    console.warn('Batch cloud save failed (saved locally):', err);
   }
 }
 

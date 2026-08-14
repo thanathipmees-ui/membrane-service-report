@@ -22,6 +22,7 @@ import {
   saveROSystemToCloud,
   deleteROSystemFromCloud,
   saveMembraneToCloud,
+  saveBatchMembranesToCloud,
   deleteMembraneFromCloud,
   DEFAULT_COMPANY
 } from './services/membraneService';
@@ -413,15 +414,14 @@ export default function App() {
       reportTitle: `${targetRoName} Membrane Cleaning Report`
     };
 
-    for (const m of importedMembranes) {
-      const membraneToSave: MembraneData = {
-        ...m,
-        companyId,
-        roId,
-        headerConfig
-      };
-      await saveMembraneToCloud(membraneToSave);
-    }
+    const preparedBatch = importedMembranes.map((m) => ({
+      ...m,
+      companyId,
+      roId,
+      headerConfig
+    }));
+
+    await saveBatchMembranesToCloud(preparedBatch);
 
     setActiveCompanyId(companyId);
     setActiveRoId(roId);
