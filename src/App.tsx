@@ -67,10 +67,13 @@ export default function App() {
           if (!isMounted) return;
           if (ros.length > 0) {
             setRoSystems(ros);
-            const targetRoId = ros.some((r) => r.id === activeRoId) ? activeRoId : ros[0].id;
+            const targetRo = ros.some((r) => r.id === activeRoId)
+              ? ros.find((r) => r.id === activeRoId)
+              : ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || ros[0];
+            const targetRoId = targetRo?.id || ros[0].id;
             setActiveRoId(targetRoId);
 
-            const mems = await fetchMembranesFromCloud(targetCompId, targetRoId);
+            const mems = await fetchMembranesFromCloud(targetCompId, targetRoId, targetRo?.name);
             if (!isMounted) return;
             setMembranes(mems);
           }
@@ -92,10 +95,11 @@ export default function App() {
     try {
       const ros = await fetchROSystemsFromCloud(companyId);
       setRoSystems(ros);
-      const nextRoId = ros[0]?.id || '';
+      const targetRo = ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || ros[0];
+      const nextRoId = targetRo?.id || '';
       setActiveRoId(nextRoId);
       if (nextRoId) {
-        const mems = await fetchMembranesFromCloud(companyId, nextRoId);
+        const mems = await fetchMembranesFromCloud(companyId, nextRoId, targetRo?.name);
         setMembranes(mems);
       } else {
         setMembranes([]);
@@ -109,8 +113,9 @@ export default function App() {
   // Handle Select RO System with targeted Cloud Fetch
   const handleSelectRO = async (roId: string) => {
     setActiveRoId(roId);
+    const targetRo = roSystems.find((r) => r.id === roId);
     try {
-      const mems = await fetchMembranesFromCloud(activeCompanyId, roId);
+      const mems = await fetchMembranesFromCloud(activeCompanyId, roId, targetRo?.name);
       setMembranes(mems);
       setCurrentIndex(0);
     } catch (err) {
@@ -137,7 +142,8 @@ export default function App() {
       setActiveRoId(targetRoId);
 
       if (targetRoId) {
-        const mems = await fetchMembranesFromCloud(targetCompId, targetRoId);
+        const targetRo = ros.find((r) => r.id === targetRoId);
+        const mems = await fetchMembranesFromCloud(targetCompId, targetRoId, targetRo?.name, true);
         setMembranes(mems);
       }
       setIsCloudConnected(true);

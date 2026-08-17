@@ -17,21 +17,6 @@ const COMPANIES_COL = 'companies';
 const RO_SYSTEMS_COL = 'ro_systems';
 const MEMBRANES_COL = 'membranes';
 
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errMsg = error instanceof Error ? error.message : String(error);
-  const isQuota = errMsg.includes('Quota limit exceeded') || errMsg.includes('RESOURCE_EXHAUSTED');
-  return new Error(isQuota ? 'Firestore quota exceeded' : errMsg);
-}
-
 export const DEFAULT_COMPANY: Company = {
   id: 'lion-corp',
   name: 'Lion Corporation (Thailand) Limited',
@@ -45,8 +30,8 @@ export const DEFAULT_RO_SYSTEMS: ROSystem[] = [
     name: 'RO1 Pass 1',
     headerConfig: {
       ...defaultHeaderConfig,
-      jobDescription: 'Cleaning Membrane RO1 Pass1',
-      reportTitle: 'RO1 Pass1 Membrane Cleaning Report'
+      jobDescription: 'Cleaning Membrane RO1 Pass 1',
+      reportTitle: 'RO1 Pass 1 Membrane Cleaning Report'
     },
     createdAt: new Date().toISOString()
   },
@@ -56,8 +41,8 @@ export const DEFAULT_RO_SYSTEMS: ROSystem[] = [
     name: 'RO2 Pass 1',
     headerConfig: {
       ...defaultHeaderConfig,
-      jobDescription: 'Cleaning Membrane RO2 Pass1',
-      reportTitle: 'RO2 Pass1 Membrane Cleaning Report'
+      jobDescription: 'Cleaning Membrane RO2 Pass 1',
+      reportTitle: 'RO2 Pass 1 Membrane Cleaning Report'
     },
     createdAt: new Date().toISOString()
   },
@@ -67,8 +52,8 @@ export const DEFAULT_RO_SYSTEMS: ROSystem[] = [
     name: 'RO3 Pass 1',
     headerConfig: {
       ...defaultHeaderConfig,
-      jobDescription: 'Cleaning Membrane RO3 Pass1',
-      reportTitle: 'RO3 Pass1 Membrane Cleaning Report'
+      jobDescription: 'Cleaning Membrane RO3 Pass 1',
+      reportTitle: 'RO3 Pass 1 Membrane Cleaning Report'
     },
     createdAt: new Date().toISOString()
   },
@@ -78,8 +63,8 @@ export const DEFAULT_RO_SYSTEMS: ROSystem[] = [
     name: 'RO4 Pass 1',
     headerConfig: {
       ...defaultHeaderConfig,
-      jobDescription: 'Cleaning Membrane RO4 Pass1',
-      reportTitle: 'RO4 Pass1 Membrane Cleaning Report'
+      jobDescription: 'Cleaning Membrane RO4 Pass 1',
+      reportTitle: 'RO4 Pass 1 Membrane Cleaning Report'
     },
     createdAt: new Date().toISOString()
   },
@@ -89,12 +74,43 @@ export const DEFAULT_RO_SYSTEMS: ROSystem[] = [
     name: 'RO5 Pass 1',
     headerConfig: {
       ...defaultHeaderConfig,
-      jobDescription: 'Cleaning Membrane RO5 Pass1',
-      reportTitle: 'RO5 Pass1 Membrane Cleaning Report'
+      jobDescription: 'Cleaning Membrane RO5 Pass 1',
+      reportTitle: 'RO5 Pass 1 Membrane Cleaning Report'
     },
     createdAt: new Date().toISOString()
   }
 ];
+
+/**
+ * Check if the RO is Lion RO4 Pass 1
+ */
+export function isLionRO4(companyId?: string, roId?: string, roName?: string): boolean {
+  const isLion = !companyId || companyId === 'lion-corp' || companyId.toLowerCase().includes('lion');
+  const isRO4 =
+    !roId ||
+    roId === 'lion-ro-4' ||
+    roId.toLowerCase().includes('ro-4') ||
+    roId.toLowerCase().includes('ro4') ||
+    (roName && (roName.toLowerCase().includes('ro4') || roName.toLowerCase().includes('ro 4')));
+  return isLion && isRO4;
+}
+
+/**
+ * Generates the full 30 initial membranes for RO4 Pass 1
+ */
+export function getDefaultLionRO4Membranes(targetRoId = 'lion-ro-4', targetCompanyId = 'lion-corp'): MembraneData[] {
+  return initialMembranes.map((m) => ({
+    ...m,
+    id: `${targetCompanyId}_${targetRoId}_${m.membraneNo}`,
+    companyId: targetCompanyId,
+    roId: targetRoId,
+    headerConfig: m.headerConfig || {
+      ...defaultHeaderConfig,
+      jobDescription: 'Cleaning Membrane RO4 Pass 1',
+      reportTitle: 'RO4 Pass 1 Membrane Cleaning Report'
+    }
+  }));
+}
 
 /**
  * Sanitizes object values to ensure no `undefined` fields are sent to Firestore.
@@ -124,6 +140,9 @@ const STORAGE_COMPANIES_KEY = 'ro_membrane_app_companies_v1';
 const STORAGE_RO_SYSTEMS_KEY = 'ro_membrane_app_ro_systems_v1';
 const STORAGE_MEMBRANES_KEY = 'ro_membrane_app_membranes_v1';
 
+// In-memory cache to prevent duplicate Firestore calls during the session
+const sessionFetchedROs = new Set<string>();
+
 export function getCachedCompanies(): Company[] {
   try {
     const raw = localStorage.getItem(STORAGE_COMPANIES_KEY);
@@ -151,8 +170,12 @@ export function getCachedROSystems(companyId?: string): ROSystem[] {
     if (raw) {
       const all: ROSystem[] = JSON.parse(raw);
       if (Array.isArray(all) && all.length > 0) {
-        if (companyId) return all.filter((r) => r.companyId === companyId);
-        return all;
+        if (companyId) {
+          const filtered = all.filter((r) => r.companyId === companyId);
+          if (filtered.length > 0) return filtered;
+        } else {
+          return all;
+        }
       }
     }
   } catch (e) {
@@ -170,14 +193,25 @@ export function setCachedROSystems(roSystems: ROSystem[]): void {
   }
 }
 
-export function getCachedMembranes(companyId?: string, roId?: string): MembraneData[] {
+export function getCachedMembranes(companyId?: string, roId?: string, roName?: string): MembraneData[] {
   try {
     const raw = localStorage.getItem(STORAGE_MEMBRANES_KEY);
     if (raw) {
       const all: MembraneData[] = JSON.parse(raw);
       if (Array.isArray(all) && all.length > 0) {
         if (companyId && roId) {
-          return all.filter((m) => m.companyId === companyId && m.roId === roId);
+          const matched = all.filter((m) => m.companyId === companyId && m.roId === roId);
+          if (matched.length > 0) {
+            return matched.sort((a, b) => Number(a.membraneNo) - Number(b.membraneNo));
+          }
+          // If this is Lion RO4 Pass 1 and no membranes found with this exact roId, return initial 30 membranes
+          if (isLionRO4(companyId, roId, roName)) {
+            const defaults = getDefaultLionRO4Membranes(roId, companyId);
+            // Save into cache for future
+            setCachedMembranes([...all.filter((m) => !(m.companyId === companyId && m.roId === roId)), ...defaults]);
+            return defaults;
+          }
+          return [];
         }
         return all;
       }
@@ -185,15 +219,15 @@ export function getCachedMembranes(companyId?: string, roId?: string): MembraneD
   } catch (e) {
     console.warn('Failed to read cached membranes:', e);
   }
-  const defaultList = initialMembranes.map((m) => ({
-    ...m,
-    id: m.id || `lion-corp_lion-ro-4_${m.membraneNo}`,
-    companyId: m.companyId || 'lion-corp',
-    roId: m.roId || 'lion-ro-4',
-    headerConfig: m.headerConfig || { ...defaultHeaderConfig }
-  }));
+
+  // Fallback if localStorage is empty
+  const defaultList = getDefaultLionRO4Membranes(roId || 'lion-ro-4', companyId || 'lion-corp');
   if (companyId && roId) {
-    return defaultList.filter((m) => m.companyId === companyId && m.roId === roId);
+    if (isLionRO4(companyId, roId, roName)) {
+      setCachedMembranes(defaultList);
+      return defaultList;
+    }
+    return [];
   }
   return defaultList;
 }
@@ -203,27 +237,24 @@ export function setCachedMembranes(membranes: MembraneData[]): void {
     localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(membranes));
   } catch (e) {
     try {
-      const lightweight = membranes.map((m) => {
-        const copy: MembraneData = {
-          ...m,
-          chartImage: undefined,
-          images: {
-            before: m.images?.before ? m.images.before.slice(0, 1) : [],
-            after: m.images?.after ? m.images.after.slice(0, 1) : []
-          }
-        };
-        return copy;
-      });
+      const lightweight = membranes.map((m) => ({
+        ...m,
+        chartImage: undefined,
+        images: {
+          before: m.images?.before ? m.images.before.slice(0, 1) : [],
+          after: m.images?.after ? m.images.after.slice(0, 1) : []
+        }
+      }));
       localStorage.setItem(STORAGE_MEMBRANES_KEY, JSON.stringify(lightweight));
     } catch (err2) {
-      // Silently ignore
+      // Ignore
     }
   }
 }
 
 /**
  * Fetch all Companies from Cloud Firestore directly.
- * Consumes only 1 collection read.
+ * Consumes only 1 read query.
  */
 export async function fetchCompaniesFromCloud(): Promise<Company[]> {
   try {
@@ -236,6 +267,10 @@ export async function fetchCompaniesFromCloud(): Promise<Company[]> {
       list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
       setCachedCompanies(list);
       return list;
+    } else {
+      // Seed default company
+      await saveCompanyToCloud(DEFAULT_COMPANY);
+      return [DEFAULT_COMPANY];
     }
   } catch (err) {
     console.warn('Could not fetch companies from cloud, using cache:', err);
@@ -245,7 +280,6 @@ export async function fetchCompaniesFromCloud(): Promise<Company[]> {
 
 /**
  * Fetch RO Systems for a specific Company directly from Cloud Firestore.
- * Uses targeted where clause (only reads ROs for this company, e.g. ~5 reads).
  */
 export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSystem[]> {
   if (!companyId) return getCachedROSystems();
@@ -259,10 +293,17 @@ export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSyst
       });
       list.sort((a, b) => a.name.localeCompare(b.name, 'th', { numeric: true }));
       
-      // Update cache for this company
       const allCached = getCachedROSystems().filter((r) => r.companyId !== companyId);
       setCachedROSystems([...allCached, ...list]);
       return list;
+    } else {
+      // Seed default ROs if this is lion-corp
+      if (companyId === 'lion-corp') {
+        for (const ro of DEFAULT_RO_SYSTEMS) {
+          await saveROSystemToCloud(ro);
+        }
+        return DEFAULT_RO_SYSTEMS;
+      }
     }
   } catch (err) {
     console.warn('Could not fetch RO systems from cloud, using cache:', err);
@@ -272,10 +313,23 @@ export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSyst
 
 /**
  * Fetch Membranes for a specific RO System directly from Cloud Firestore.
- * Targeted where clause (only reads ~10-20 membranes for this active RO).
+ * Implements session memory caching to achieve 0 reads when clicking between tabs.
  */
-export async function fetchMembranesFromCloud(companyId: string, roId: string): Promise<MembraneData[]> {
-  if (!companyId || !roId) return getCachedMembranes(companyId, roId);
+export async function fetchMembranesFromCloud(
+  companyId: string,
+  roId: string,
+  roName?: string,
+  forceRefresh = false
+): Promise<MembraneData[]> {
+  if (!companyId || !roId) return getCachedMembranes(companyId, roId, roName);
+
+  const cacheKey = `${companyId}_${roId}`;
+
+  // If already fetched in this session and not forced, return cached data (0 reads)
+  if (!forceRefresh && sessionFetchedROs.has(cacheKey)) {
+    return getCachedMembranes(companyId, roId, roName);
+  }
+
   try {
     const memQ = query(
       collection(db, MEMBRANES_COL),
@@ -283,6 +337,7 @@ export async function fetchMembranesFromCloud(companyId: string, roId: string): 
       where('roId', '==', roId)
     );
     const memSnap = await getDocs(memQ);
+
     if (!memSnap.empty) {
       const list: MembraneData[] = [];
       memSnap.forEach((docSnap) => {
@@ -300,12 +355,27 @@ export async function fetchMembranesFromCloud(companyId: string, roId: string): 
       // Update cache
       const allCached = getCachedMembranes().filter((m) => !(m.companyId === companyId && m.roId === roId));
       setCachedMembranes([...allCached, ...list]);
+      sessionFetchedROs.add(cacheKey);
       return list;
+    } else {
+      // If Firestore is empty for Lion RO4 Pass 1, seed initial 30 membranes
+      if (isLionRO4(companyId, roId, roName)) {
+        const defaults = getDefaultLionRO4Membranes(roId, companyId);
+        const allCached = getCachedMembranes().filter((m) => !(m.companyId === companyId && m.roId === roId));
+        setCachedMembranes([...allCached, ...defaults]);
+        sessionFetchedROs.add(cacheKey);
+        
+        // Asynchronously batch seed to Cloud Firestore
+        saveBatchMembranesToCloud(defaults).catch((e) => console.warn('Background seed notice:', e));
+        return defaults;
+      }
     }
   } catch (err) {
     console.warn('Could not fetch membranes from cloud, using cache:', err);
   }
-  return getCachedMembranes(companyId, roId);
+
+  sessionFetchedROs.add(cacheKey);
+  return getCachedMembranes(companyId, roId, roName);
 }
 
 /**
