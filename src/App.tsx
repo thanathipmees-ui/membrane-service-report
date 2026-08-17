@@ -51,7 +51,7 @@ export default function App() {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [filterStatus, setFilterStatus] = useState<'ALL' | MembraneStatus>('ALL');
 
-  // Direct Cloud Fetch on Initial Mount (Consumes only ~15 reads total)
+  // Direct Cloud Fetch on Initial Mount with safe fallback
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -67,20 +67,38 @@ export default function App() {
           if (!isMounted) return;
           if (ros.length > 0) {
             setRoSystems(ros);
-            const targetRo = ros.some((r) => r.id === activeRoId)
-              ? ros.find((r) => r.id === activeRoId)
-              : ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || ros[0];
+            const targetRo = ros.find((r) => r.id === activeRoId)
+              || ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4'))
+              || ros[0];
             const targetRoId = targetRo?.id || ros[0].id;
             setActiveRoId(targetRoId);
 
             const mems = await fetchMembranesFromCloud(targetCompId, targetRoId, targetRo?.name);
             if (!isMounted) return;
-            setMembranes(mems);
+            if (mems && mems.length > 0) {
+              setMembranes(mems);
+            } else {
+              setMembranes(getCachedMembranes(targetCompId, targetRoId, targetRo?.name));
+            }
           }
         }
         setIsCloudConnected(true);
       } catch (err) {
         console.warn('Initial cloud connection notice:', err);
+        if (isMounted) {
+          setIsCloudConnected(false);
+          // Fallback to local cache
+          const fallbackComps = getCachedCompanies();
+          setCompanies(fallbackComps);
+          const compId = fallbackComps[0]?.id || 'lion-corp';
+          setActiveCompanyId(compId);
+          const fallbackROs = getCachedROSystems(compId);
+          setRoSystems(fallbackROs);
+          const targetRo = fallbackROs.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || fallbackROs[0];
+          const roId = targetRo?.id || fallbackROs[0]?.id || 'lion-ro-4';
+          setActiveRoId(roId);
+          setMembranes(getCachedMembranes(compId, roId, targetRo?.name));
+        }
       }
     })();
 
