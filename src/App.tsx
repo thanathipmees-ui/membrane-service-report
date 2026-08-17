@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initialMembranes } from './data/initialMembranes';
 import { Company, ROSystem, MembraneData, MembraneStatus, HeaderConfig } from './types';
 import { getMembraneHeader, defaultHeaderConfig } from './utils/calculations';
@@ -17,6 +17,7 @@ import {
   getCachedCompanies,
   getCachedROSystems,
   getCachedMembranes,
+  setCachedMembranes,
   fetchCompaniesFromCloud,
   fetchROSystemsFromCloud,
   fetchMembranesFromCloud,
@@ -27,6 +28,9 @@ import {
   saveMembraneToCloud,
   saveBatchMembranesToCloud,
   deleteMembraneFromCloud,
+  exportFullBackup,
+  importFullBackup,
+  resetCloudQuotaBlock,
   DEFAULT_COMPANY
 } from './services/membraneService';
 
@@ -47,11 +51,19 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3500);
+  };
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [filterStatus, setFilterStatus] = useState<'ALL' | MembraneStatus>('ALL');
 
-  // Direct Cloud Fetch on Initial Mount with safe fallback
+  // Single Background Sync on Initial Mount (non-blocking, quota-safe)
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -77,27 +89,14 @@ export default function App() {
             if (!isMounted) return;
             if (mems && mems.length > 0) {
               setMembranes(mems);
-            } else {
-              setMembranes(getCachedMembranes(targetCompId, targetRoId, targetRo?.name));
             }
           }
         }
         setIsCloudConnected(true);
       } catch (err) {
-        console.warn('Initial cloud connection notice:', err);
+        console.warn('Background sync note (safe fallback active):', err);
         if (isMounted) {
           setIsCloudConnected(false);
-          // Fallback to local cache
-          const fallbackComps = getCachedCompanies();
-          setCompanies(fallbackComps);
-          const compId = fallbackComps[0]?.id || 'lion-corp';
-          setActiveCompanyId(compId);
-          const fallbackROs = getCachedROSystems(compId);
-          setRoSystems(fallbackROs);
-          const targetRo = fallbackROs.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || fallbackROs[0];
-          const roId = targetRo?.id || fallbackROs[0]?.id || 'lion-ro-4';
-          setActiveRoId(roId);
-          setMembranes(getCachedMembranes(compId, roId, targetRo?.name));
         }
       }
     })();
@@ -107,42 +106,35 @@ export default function App() {
     };
   }, []);
 
-  // Handle Select Company with targeted Cloud Fetch
-  const handleSelectCompany = async (companyId: string) => {
+  // Handle Select Company - 100% Instant In-Memory / Local Cache (Zero Cloud Reads)
+  const handleSelectCompany = (companyId: string) => {
     setActiveCompanyId(companyId);
-    try {
-      const ros = await fetchROSystemsFromCloud(companyId);
-      setRoSystems(ros);
-      const targetRo = ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || ros[0];
-      const nextRoId = targetRo?.id || '';
-      setActiveRoId(nextRoId);
-      if (nextRoId) {
-        const mems = await fetchMembranesFromCloud(companyId, nextRoId, targetRo?.name);
-        setMembranes(mems);
-      } else {
-        setMembranes([]);
-      }
-      setCurrentIndex(0);
-    } catch (err) {
-      console.warn('Error fetching data for selected company:', err);
+    const ros = getCachedROSystems(companyId);
+    setRoSystems(ros);
+    const targetRo = ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4')) || ros[0];
+    const nextRoId = targetRo?.id || '';
+    setActiveRoId(nextRoId);
+    if (nextRoId) {
+      const mems = getCachedMembranes(companyId, nextRoId, targetRo?.name);
+      setMembranes(mems);
+    } else {
+      setMembranes([]);
     }
+    setCurrentIndex(0);
   };
 
-  // Handle Select RO System with targeted Cloud Fetch
-  const handleSelectRO = async (roId: string) => {
+  // Handle Select RO System - 100% Instant In-Memory / Local Cache (Zero Cloud Reads)
+  const handleSelectRO = (roId: string) => {
     setActiveRoId(roId);
     const targetRo = roSystems.find((r) => r.id === roId);
-    try {
-      const mems = await fetchMembranesFromCloud(activeCompanyId, roId, targetRo?.name);
-      setMembranes(mems);
-      setCurrentIndex(0);
-    } catch (err) {
-      console.warn('Error fetching membranes for selected RO:', err);
-    }
+    const mems = getCachedMembranes(activeCompanyId, roId, targetRo?.name);
+    setMembranes(mems);
+    setCurrentIndex(0);
   };
 
-  // Manual Cloud Sync Handler
+  // Manual Cloud Sync Handler (only when user explicitly clicks refresh)
   const handleSyncCloud = async () => {
+    resetCloudQuotaBlock();
     setIsSyncing(true);
     try {
       const comps = await fetchCompaniesFromCloud();
@@ -165,13 +157,69 @@ export default function App() {
         setMembranes(mems);
       }
       setIsCloudConnected(true);
-      showToast('เชื่อมต่อและอัปเดตข้อมูลจากคลาวด์เรียบร้อย!');
+      showToast('ซิงค์ข้อมูลกับคลาวด์เรียบร้อย!');
     } catch (err) {
       console.warn('Sync cloud status:', err);
-      showToast('เชื่อมต่อในโหมดแคช (ปลอดภัย)');
+      showToast('เชื่อมต่อในโหมดข้อมูลในเครื่อง (ปลอดภัย)');
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  // Backup All Data to JSON file
+  const handleExportBackup = () => {
+    try {
+      const backup = exportFullBackup();
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.href = url;
+      link.download = `ro_membrane_backup_${dateStr}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('ดาวน์โหลดไฟล์สำรองข้อมูล (JSON) สำเร็จ!');
+    } catch (e) {
+      console.error(e);
+      showToast('เกิดข้อผิดพลาดในการสำรองข้อมูล');
+    }
+  };
+
+  // Restore All Data from JSON file
+  const handleImportBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const content = evt.target?.result as string;
+        const parsed = JSON.parse(content);
+        const ok = importFullBackup(parsed);
+        if (ok) {
+          const comps = getCachedCompanies();
+          setCompanies(comps);
+          const cId = comps[0]?.id || 'lion-corp';
+          setActiveCompanyId(cId);
+          const ros = getCachedROSystems(cId);
+          setRoSystems(ros);
+          const rId = ros[0]?.id || 'lion-ro-4';
+          setActiveRoId(rId);
+          const mems = getCachedMembranes(cId, rId);
+          setMembranes(mems);
+          setCurrentIndex(0);
+          showToast('กู้คืนข้อมูลทั้งหมดจากไฟล์สำรองสำเร็จ!');
+        } else {
+          showToast('รูปแบบไฟล์สำรองไม่ถูกต้อง');
+        }
+      } catch (err) {
+        console.error(err);
+        showToast('ไม่สามารถอ่านไฟล์สำรองได้');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   // Filtered dataset based on status pill
@@ -207,16 +255,6 @@ export default function App() {
   // Photo Lightbox state
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [lightboxCaption, setLightboxCaption] = useState<string | null>(null);
-
-  // Toast notification state
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => {
-      setToastMsg(null);
-    }, 3500);
-  };
 
   const activeCompany = companies.find((c) => c.id === activeCompanyId) || companies[0];
   const activeRo = roSystems.find((r) => r.id === activeRoId) || roSystems[0];
@@ -557,23 +595,50 @@ export default function App() {
         </div>
       )}
 
-      {/* Cloud Status Indicator */}
+      {/* Hidden File Input for JSON Backup Import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImportBackup}
+        accept=".json,application/json"
+        className="hidden"
+      />
+
+      {/* Cloud & Local Storage Safe Status Indicator */}
       <div className="bg-slate-900 text-slate-300 text-[11px] px-4 py-1.5 flex items-center justify-between border-b border-slate-800">
-        <div className="flex items-center justify-between max-w-7xl mx-auto w-full">
+        <div className="flex flex-wrap items-center justify-between max-w-7xl mx-auto w-full gap-2">
           <div className="flex items-center gap-2">
             <span className={`w-2 h-2 rounded-full ${isCloudConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
             <span className="font-semibold text-white">
-              {isCloudConnected ? 'Cloud Database Connected (Firebase Firestore)' : 'Connecting to Cloud Database...'}
+              {isCloudConnected ? 'ระบบเก็บข้อมูลอัจฉริยะ (Local Cache + Cloud Sync)' : 'ระบบทำงานด้วยฐานข้อมูลในเครื่อง (100% Safe Offline Mode)'}
             </span>
-            <span className="text-slate-400 hidden sm:inline">&middot; ดึงข้อมูลเฉพาะ RO ที่เปิดใช้งาน ประหยัดโควต้าสูงสุด (อ่านเพียง ~15 ครั้ง/การเปิดเว็บ)</span>
+            <span className="text-slate-400 hidden md:inline">&middot; ข้อมูลทั้งหมดถูกบันทึกลงในเครื่องตลอดเวลา ข้อมูลไม่หายแน่นอน สลับ RO ได้ทันที</span>
           </div>
-          <button
-            onClick={handleSyncCloud}
-            disabled={isSyncing}
-            className="text-cyan-300 hover:text-cyan-200 underline font-medium cursor-pointer ml-2"
-          >
-            {isSyncing ? 'กำลังรีเฟรชคลาวด์...' : 'รีเฟรชข้อมูลคลาวด์'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleExportBackup}
+              title="ดาวน์โหลดไฟล์สำรองข้อมูลทั้งหมดเป็น JSON เก็บไว้ในเครื่อง"
+              className="text-emerald-300 hover:text-emerald-200 font-medium cursor-pointer flex items-center gap-1 transition-colors"
+            >
+              <span>💾 สำรองข้อมูล (Backup JSON)</span>
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="กู้คืนข้อมูลทั้งหมดจากไฟล์ Backup JSON"
+              className="text-amber-300 hover:text-amber-200 font-medium cursor-pointer flex items-center gap-1 transition-colors"
+            >
+              <span>📂 กู้คืนข้อมูล (Restore JSON)</span>
+            </button>
+            <span className="text-slate-600">|</span>
+            <button
+              onClick={handleSyncCloud}
+              disabled={isSyncing}
+              className="text-cyan-300 hover:text-cyan-200 underline font-medium cursor-pointer"
+            >
+              {isSyncing ? 'กำลังซิงค์...' : 'รีเฟรชคลาวด์'}
+            </button>
+          </div>
         </div>
       </div>
 

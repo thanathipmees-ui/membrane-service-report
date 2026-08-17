@@ -252,11 +252,38 @@ export function setCachedMembranes(membranes: MembraneData[]): void {
   }
 }
 
+// Quota-safe guard flag to prevent hammering Firestore when limit is reached
+let isCloudQuotaBlocked = false;
+
+export function getIsCloudQuotaBlocked(): boolean {
+  return isCloudQuotaBlocked;
+}
+
+export function resetCloudQuotaBlock(): void {
+  isCloudQuotaBlocked = false;
+}
+
+/**
+ * Check if an error is quota related
+ */
+function isQuotaError(err: any): boolean {
+  const str = String(err || '').toLowerCase();
+  return (
+    str.includes('quota') ||
+    str.includes('resource_exhausted') ||
+    str.includes('exceeded') ||
+    str.includes('limit')
+  );
+}
+
 /**
  * Fetch all Companies from Cloud Firestore directly.
  * Consumes only 1 read query.
  */
 export async function fetchCompaniesFromCloud(): Promise<Company[]> {
+  if (isCloudQuotaBlocked) {
+    return getCachedCompanies();
+  }
   try {
     const compSnap = await getDocs(collection(db, COMPANIES_COL));
     if (!compSnap.empty) {
@@ -267,13 +294,14 @@ export async function fetchCompaniesFromCloud(): Promise<Company[]> {
       list.sort((a, b) => a.name.localeCompare(b.name, 'th'));
       setCachedCompanies(list);
       return list;
-    } else {
-      // Seed default company
-      await saveCompanyToCloud(DEFAULT_COMPANY);
-      return [DEFAULT_COMPANY];
     }
   } catch (err) {
-    console.warn('Could not fetch companies from cloud, using cache:', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+      console.warn('Firestore Quota reached: switching to 100% offline local storage mode.');
+    } else {
+      console.warn('Could not fetch companies from cloud, using cache:', err);
+    }
   }
   return getCachedCompanies();
 }
@@ -282,7 +310,7 @@ export async function fetchCompaniesFromCloud(): Promise<Company[]> {
  * Fetch RO Systems for a specific Company directly from Cloud Firestore.
  */
 export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSystem[]> {
-  if (!companyId) return getCachedROSystems();
+  if (!companyId || isCloudQuotaBlocked) return getCachedROSystems(companyId);
   try {
     const roQ = query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId));
     const roSnap = await getDocs(roQ);
@@ -296,17 +324,14 @@ export async function fetchROSystemsFromCloud(companyId: string): Promise<ROSyst
       const allCached = getCachedROSystems().filter((r) => r.companyId !== companyId);
       setCachedROSystems([...allCached, ...list]);
       return list;
-    } else {
-      // Seed default ROs if this is lion-corp
-      if (companyId === 'lion-corp') {
-        for (const ro of DEFAULT_RO_SYSTEMS) {
-          await saveROSystemToCloud(ro);
-        }
-        return DEFAULT_RO_SYSTEMS;
-      }
     }
   } catch (err) {
-    console.warn('Could not fetch RO systems from cloud, using cache:', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+      console.warn('Firestore Quota reached: switching to 100% offline local storage mode.');
+    } else {
+      console.warn('Could not fetch RO systems from cloud, using cache:', err);
+    }
   }
   return getCachedROSystems(companyId);
 }
@@ -325,8 +350,8 @@ export async function fetchMembranesFromCloud(
 
   const cacheKey = `${companyId}_${roId}`;
 
-  // If already fetched in this session and not forced, return cached data (0 reads)
-  if (!forceRefresh && sessionFetchedROs.has(cacheKey)) {
+  // If already fetched in this session or quota blocked, return cached data (0 reads)
+  if (!forceRefresh && (sessionFetchedROs.has(cacheKey) || isCloudQuotaBlocked)) {
     return getCachedMembranes(companyId, roId, roName);
   }
 
@@ -357,21 +382,14 @@ export async function fetchMembranesFromCloud(
       setCachedMembranes([...allCached, ...list]);
       sessionFetchedROs.add(cacheKey);
       return list;
-    } else {
-      // If Firestore is empty for Lion RO4 Pass 1, seed initial 30 membranes
-      if (isLionRO4(companyId, roId, roName)) {
-        const defaults = getDefaultLionRO4Membranes(roId, companyId);
-        const allCached = getCachedMembranes().filter((m) => !(m.companyId === companyId && m.roId === roId));
-        setCachedMembranes([...allCached, ...defaults]);
-        sessionFetchedROs.add(cacheKey);
-        
-        // Asynchronously batch seed to Cloud Firestore
-        saveBatchMembranesToCloud(defaults).catch((e) => console.warn('Background seed notice:', e));
-        return defaults;
-      }
     }
   } catch (err) {
-    console.warn('Could not fetch membranes from cloud, using cache:', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+      console.warn('Firestore Quota reached: switching to 100% offline local storage mode.');
+    } else {
+      console.warn('Could not fetch membranes from cloud, using cache:', err);
+    }
   }
 
   sessionFetchedROs.add(cacheKey);
@@ -624,3 +642,43 @@ export async function deleteMembraneFromCloud(
     }
   }
 }
+
+export interface FullBackupPayload {
+  version: number;
+  exportedAt: string;
+  companies: Company[];
+  roSystems: ROSystem[];
+  membranes: MembraneData[];
+}
+
+/**
+ * Export all local data as a downloadable JSON object
+ */
+export function exportFullBackup(): FullBackupPayload {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    companies: getCachedCompanies(),
+    roSystems: getCachedROSystems(),
+    membranes: getCachedMembranes()
+  };
+}
+
+/**
+ * Import and restore backup from JSON payload
+ */
+export function importFullBackup(payload: FullBackupPayload): boolean {
+  try {
+    if (!payload || !Array.isArray(payload.companies) || !Array.isArray(payload.roSystems) || !Array.isArray(payload.membranes)) {
+      throw new Error('Invalid backup structure');
+    }
+    setCachedCompanies(payload.companies);
+    setCachedROSystems(payload.roSystems);
+    setCachedMembranes(payload.membranes);
+    return true;
+  } catch (err) {
+    console.error('Import failed:', err);
+    return false;
+  }
+}
+
