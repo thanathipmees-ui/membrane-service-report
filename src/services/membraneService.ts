@@ -153,6 +153,7 @@ export function getCachedCompanies(): Company[] {
   } catch (e) {
     console.warn('Failed to read cached companies:', e);
   }
+  setCachedCompanies([DEFAULT_COMPANY]);
   return [DEFAULT_COMPANY];
 }
 
@@ -181,6 +182,7 @@ export function getCachedROSystems(companyId?: string): ROSystem[] {
   } catch (e) {
     console.warn('Failed to read cached ro systems:', e);
   }
+  setCachedROSystems(DEFAULT_RO_SYSTEMS);
   if (companyId) return DEFAULT_RO_SYSTEMS.filter((r) => r.companyId === companyId);
   return DEFAULT_RO_SYSTEMS;
 }
@@ -220,11 +222,11 @@ export function getCachedMembranes(companyId?: string, roId?: string, roName?: s
     console.warn('Failed to read cached membranes:', e);
   }
 
-  // Fallback if localStorage is empty
+  // Fallback if localStorage is empty: generate and store initial 30 membranes
   const defaultList = getDefaultLionRO4Membranes(roId || 'lion-ro-4', companyId || 'lion-corp');
+  setCachedMembranes(defaultList);
   if (companyId && roId) {
     if (isLionRO4(companyId, roId, roName)) {
-      setCachedMembranes(defaultList);
       return defaultList;
     }
     return [];
@@ -414,11 +416,15 @@ export async function saveCompanyToCloud(company: Company): Promise<void> {
   }
   setCachedCompanies(cached);
 
+  if (isCloudQuotaBlocked) return;
+
   try {
     const docRef = doc(db, COMPANIES_COL, company.id);
     await setDoc(docRef, dataToSave, { merge: true });
   } catch (err) {
-    console.warn('Cloud save company failed (saved locally):', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -435,13 +441,10 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
   const cachedMems = getCachedMembranes().filter((m) => m.companyId !== companyId);
   setCachedMembranes(cachedMems);
 
-  try {
-    await deleteDoc(doc(db, COMPANIES_COL, companyId));
-  } catch (err) {
-    console.warn('Cloud delete company doc failed:', err);
-  }
+  if (isCloudQuotaBlocked) return;
 
   try {
+    await deleteDoc(doc(db, COMPANIES_COL, companyId));
     const roQ = query(collection(db, RO_SYSTEMS_COL), where('companyId', '==', companyId));
     const roSnapshot = await getDocs(roQ);
     if (!roSnapshot.empty) {
@@ -451,11 +454,6 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
       });
       await batch.commit();
     }
-  } catch (err) {
-    console.warn('Cloud delete company RO systems failed:', err);
-  }
-
-  try {
     const memQ = query(collection(db, MEMBRANES_COL), where('companyId', '==', companyId));
     const memSnapshot = await getDocs(memQ);
     if (!memSnapshot.empty) {
@@ -466,7 +464,9 @@ export async function deleteCompanyFromCloud(companyId: string): Promise<void> {
       await batch.commit();
     }
   } catch (err) {
-    console.warn('Cloud delete company membranes failed:', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -488,11 +488,15 @@ export async function saveROSystemToCloud(roSystem: ROSystem): Promise<void> {
   }
   setCachedROSystems(cached);
 
+  if (isCloudQuotaBlocked) return;
+
   try {
     const docRef = doc(db, RO_SYSTEMS_COL, roSystem.id);
     await setDoc(docRef, dataToSave, { merge: true });
   } catch (err) {
-    console.warn('Cloud save RO system failed (saved locally):', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -506,13 +510,10 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
   const cachedMems = getCachedMembranes().filter((m) => m.roId !== roId);
   setCachedMembranes(cachedMems);
 
-  try {
-    await deleteDoc(doc(db, RO_SYSTEMS_COL, roId));
-  } catch (err) {
-    console.warn('Cloud delete RO system doc failed:', err);
-  }
+  if (isCloudQuotaBlocked) return;
 
   try {
+    await deleteDoc(doc(db, RO_SYSTEMS_COL, roId));
     const memQ = query(collection(db, MEMBRANES_COL), where('roId', '==', roId));
     const memSnapshot = await getDocs(memQ);
     if (!memSnapshot.empty) {
@@ -523,7 +524,9 @@ export async function deleteROSystemFromCloud(roId: string): Promise<void> {
       await batch.commit();
     }
   } catch (err) {
-    console.warn('Cloud delete RO membranes failed:', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -558,6 +561,8 @@ export async function saveBatchMembranesToCloud(membranesList: MembraneData[]): 
 
   setCachedMembranes(updatedMembranes);
 
+  if (isCloudQuotaBlocked) return;
+
   try {
     const batch = writeBatch(db);
     membranesList.forEach((m) => {
@@ -576,7 +581,9 @@ export async function saveBatchMembranesToCloud(membranesList: MembraneData[]): 
     });
     await batch.commit();
   } catch (err) {
-    console.warn('Batch cloud save failed (saved locally):', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -608,11 +615,15 @@ export async function saveMembraneToCloud(membrane: MembraneData): Promise<void>
   }
   setCachedMembranes(cached);
 
+  if (isCloudQuotaBlocked) return;
+
   try {
     const docRef = doc(db, MEMBRANES_COL, docId);
     await setDoc(docRef, dataToSave, { merge: true });
   } catch (err) {
-    console.warn('Cloud save membrane failed (saved locally):', err);
+    if (isQuotaError(err)) {
+      isCloudQuotaBlocked = true;
+    }
   }
 }
 
@@ -634,11 +645,15 @@ export async function deleteMembraneFromCloud(
     const cachedMems = getCachedMembranes().filter((m) => m.id !== targetId);
     setCachedMembranes(cachedMems);
 
+    if (isCloudQuotaBlocked) return;
+
     try {
       const docRef = doc(db, MEMBRANES_COL, targetId);
       await deleteDoc(docRef);
     } catch (err) {
-      console.warn('Cloud delete membrane failed (deleted locally):', err);
+      if (isQuotaError(err)) {
+        isCloudQuotaBlocked = true;
+      }
     }
   }
 }

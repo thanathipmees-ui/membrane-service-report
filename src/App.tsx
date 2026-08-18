@@ -63,47 +63,22 @@ export default function App() {
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [filterStatus, setFilterStatus] = useState<'ALL' | MembraneStatus>('ALL');
 
-  // Single Background Sync on Initial Mount (non-blocking, quota-safe)
+  // Zero-Quota / Local-First Database Architecture
+  // The app initializes and runs 100% locally from device storage with 0 cloud reads.
+  // Cloud sync only runs when the user explicitly clicks the sync button.
   useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      try {
-        const comps = await fetchCompaniesFromCloud();
-        if (!isMounted) return;
-        if (comps.length > 0) {
-          setCompanies(comps);
-          const targetCompId = comps.some((c) => c.id === activeCompanyId) ? activeCompanyId : comps[0].id;
-          setActiveCompanyId(targetCompId);
-
-          const ros = await fetchROSystemsFromCloud(targetCompId);
-          if (!isMounted) return;
-          if (ros.length > 0) {
-            setRoSystems(ros);
-            const targetRo = ros.find((r) => r.id === activeRoId)
-              || ros.find((r) => r.id === 'lion-ro-4' || r.name.includes('RO4') || r.name.includes('RO 4'))
-              || ros[0];
-            const targetRoId = targetRo?.id || ros[0].id;
-            setActiveRoId(targetRoId);
-
-            const mems = await fetchMembranesFromCloud(targetCompId, targetRoId, targetRo?.name);
-            if (!isMounted) return;
-            if (mems && mems.length > 0) {
-              setMembranes(mems);
-            }
-          }
-        }
-        setIsCloudConnected(true);
-      } catch (err) {
-        console.warn('Background sync note (safe fallback active):', err);
-        if (isMounted) {
-          setIsCloudConnected(false);
-        }
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
+    // Ensure all data caches are initialized in memory
+    const comps = getCachedCompanies();
+    setCompanies(comps);
+    const cId = activeCompanyId || comps[0]?.id || 'lion-corp';
+    setActiveCompanyId(cId);
+    const ros = getCachedROSystems(cId);
+    setRoSystems(ros);
+    const rId = activeRoId || ros[0]?.id || 'lion-ro-4';
+    setActiveRoId(rId);
+    const targetRo = ros.find((r) => r.id === rId);
+    const mems = getCachedMembranes(cId, rId, targetRo?.name);
+    setMembranes(mems);
   }, []);
 
   // Handle Select Company - 100% Instant In-Memory / Local Cache (Zero Cloud Reads)
@@ -590,7 +565,7 @@ export default function App() {
     <div className="min-h-screen bg-[#edf3f8] text-slate-900 font-sans pb-16">
       {/* Toast Banner */}
       {toastMsg && (
-        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 font-bold text-xs sm:text-sm animate-bounce">
+        <div className="fixed top-5 right-5 z-50 bg-slate-900/95 text-white px-5 py-3 rounded-2xl shadow-xl border border-slate-700/80 font-bold text-xs sm:text-sm backdrop-blur-md transition-all duration-300 transform translate-y-0">
           {toastMsg}
         </div>
       )}
